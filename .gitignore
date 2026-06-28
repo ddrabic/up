@@ -1,0 +1,42 @@
+# Okružne varijable - NIKADA ne commituj ove datoteke!
+.env
+.env.local
+.env.*.local
+config.local.php
+
+# Uploadane JSON datoteke
+uploads/*.json
+imports/
+uploads/*.php
+uploads/*.phtml
+uploads/*.phar
+
+# Log datoteke
+logs/
+upp_log.txt
+error_log
+
+# Arhive i backup datoteke
+*.zip
+*.tar
+*.tar.gz
+*.tgz
+*.bak
+*.backup
+*.old
+*.orig
+*~
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Composer
+vendor/
+composer.lock

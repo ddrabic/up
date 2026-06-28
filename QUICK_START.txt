@@ -1,0 +1,135 @@
+╔════════════════════════════════════════════════════════════════════════════╗
+║                  🚀 UPP - BRZI POČETAK (5 MINUTA)                         ║
+╚════════════════════════════════════════════════════════════════════════════╝
+
+1️⃣  POSTAVLJANJE (.env datoteka)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  
+  $ cp .env.example .env
+  $ nano .env
+  
+  Popuni:
+  - WOO_URL=https://dinamic.hr
+  - WOO_CONSUMER_KEY=ck_xxxx... (iz WordPress Admin)
+  - WOO_CONSUMER_SECRET=cs_xxxx... (iz WordPress Admin)
+
+  💾 Spremi sa: Ctrl+O → Enter → Ctrl+X
+
+
+2️⃣  GENERISANJE WooCommerce KREDENCIJALA
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  U WordPress Admin:
+  1. Uđi: WooCommerce → Settings → REST API
+  2. Klikni: "Gener Key/Secret"
+  3. Postavi Permission: "Read/Write"
+  4. Kopiraj Consumer Key i Secret u .env
+
+
+3️⃣  PROSLEDI UPP APLIKACIJU
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  Otvori: https://dinamic.hr/upp/
+  
+  👤 Login: (postavi pre nego što koristiš)
+  
+  Formu za upload vidićeš sa linkovim:
+  ✓ Pregled JSON datoteke
+  ✓ Import podataka iz JSON datoteke
+
+
+4️⃣  UPLOADUJ JSON DATOTEKU
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  1. Klikni "Odaberi datoteku"
+  2. Odaberi JSON sa tvojim proizvodima
+  3. Klikni "Učitaj datoteku"
+  
+  ⚠️  JSON mora sadržavati:
+     - kodRobe (SKU)
+     - nazivRobe (naziv)
+     - MPC (cena)
+     - stanje (količina)
+
+
+5️⃣  PREGLED PRE IMPORTA
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  Klikni "Pregled JSON datoteke"
+  
+  Videćeš tabelu sa svim proizvodima:
+  ✓ Kod robe (SKU)
+  ✓ Naziv
+  ✓ Cena (MPC)
+  ✓ Stanje
+  ✓ Aktivnost
+  
+  Sortiraj po koloni ako trebaš
+  Paginiraj sa izbora: 10, 20, 50, 100, 500, 1000, 10000
+
+
+6️⃣  POKRENI IMPORT
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  1. Otvori "Import podataka iz JSON datoteke"
+  2. Unesenoj "broj" (obično 0 za početak)
+  3. Klikni "Importiraj podatke"
+  
+  Videćeš tabelu sa statusima:
+  ✓ + = Dodan novi proizvod
+  ✓ = = Ažuriran postojeći
+  ✓ - = Nije ažuriran (greška)
+  ✓ ? = Nije pronađen (SKU ne postoji)
+  ✓ < = Preskočen (neaktivan bez stanja)
+  ✓ ~ = KRAJ datoteke
+  ✓ # = GREŠKA
+
+
+7️⃣  MONITOR LOGOVA
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  $ tail -f upp_log.txt
+  
+  Vidi detaljne logove svih operacija
+
+
+╔════════════════════════════════════════════════════════════════════════════╗
+║                         ⏱️  PROCENJENO VREME                              ║
+╚════════════════════════════════════════════════════════════════════════════╝
+
+  - 100 zapisa:     ~30 sekundi
+  - 1,000 zapisa:   ~5 minuta
+  - 10,000 zapisa:  ~50 minuta
+  (Inkl. anti-throttling pausa od 10s nakon svakih 100)
+
+
+╔════════════════════════════════════════════════════════════════════════════╗
+║                      🐛 ČESTA PITANJA (FAQ)                              ║
+╚════════════════════════════════════════════════════════════════════════════╝
+
+P: "Gre ška: WooCommerce kredencijali nisu postavljeni"
+O: Proveri da li postoji .env datoteka i da li su WOO_CONSUMER_KEY i 
+   WOO_CONSUMER_SECRET popunjeni.
+
+P: "Gre ška: JSON nije validan"
+O: Proveri JSON strukturu sa https://jsonlint.com/
+   Proveritakonste obavezna polja: kodRobe, nazivRobe, MPC, stanje
+
+P: "Import je spora"
+O: To je normalno! Anti-throttling pauzira 10s nakon svakih 100 zapisa.
+   Vidi PROCENJENO VREME iznad.
+
+P: "Kako vidim što je bilo po greške?"
+O: $ tail -f upp_log.txt
+   ili proveri upload.php izlaz
+
+
+╔════════════════════════════════════════════════════════════════════════════╗
+║                        📚 PUNA DOKUMENTACIJA                              ║
+╚════════════════════════════════════════════════════════════════════════════╝
+
+- README.md       → Kompletne instrukcije
+- ISSUES.md       → Registrovani problemi i rešenja
+- CHANGELOG.md    → Šta je urađeno
+- .env.example    → Template za konfiguraciju
+
