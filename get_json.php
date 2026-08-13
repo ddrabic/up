@@ -1,19 +1,11 @@
 <?php
+declare(strict_types=1);
 require __DIR__ . '/login_check.php';
-// biblioteka vlastitih funkcija
-require_once __DIR__ . "/lib/upplib.php";
-
-// PRIPREMA JSON datoteke
-$json_data=parse_json(__DIR__ . "/uploads/datoteka.json");
-if ( empty($json_data) || !is_array($json_data)):
-    $result=['kodRobe:'=>'Greška','Naziv'=>'Datoteka nije učitana'];
-    die('Datoteka nije učitana');
-else:
-    $result=array();
-    foreach($json_data as $k => $obj):
-        array_push($result, $obj);
-    endforeach;
-endif;
-// Get all product attributes from JSON
-echo json_encode($result);
-?>
+require __DIR__ . '/vendor/autoload.php';
+header('Content-Type: application/json; charset=utf-8');
+try {
+    echo json_encode((new Upp\Import\JsonFileReader())->read(__DIR__ . '/uploads/datoteka.json'), JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR);
+} catch (Throwable $exception) {
+    http_response_code(422);
+    echo json_encode(['success' => false, 'message' => $exception->getMessage()], JSON_UNESCAPED_UNICODE);
+}

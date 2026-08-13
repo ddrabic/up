@@ -1,6 +1,10 @@
 <?php
 ini_set('default_charset','utf-8');
 require __DIR__ . '/lib/config.php';
+ini_set('session.use_strict_mode', '1');
+ini_set('session.cookie_httponly', '1');
+ini_set('session.cookie_samesite', 'Lax');
+if (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off') ini_set('session.cookie_secure', '1');
 session_start();
 if (isset($_POST['username']) and isset($_POST['password'])){
     $username = $_POST['username'];
@@ -18,7 +22,7 @@ if (isset($_POST['username']) and isset($_POST['password'])){
         $_SESSION['username'] = $username;
         unset($_SESSION['csrf_token']);
         echo 'uspjeh';
-        echo '<div><h1>Uspješno ste logirani</h1><p><a href="/upp/index.php">Početna stranica</a></div></p>';
+        echo '<div><h1>Uspješno ste logirani</h1><p><a href="index.php">Početna stranica</a></p></div>';
     }
     else {
         echo 'neuspjeh';

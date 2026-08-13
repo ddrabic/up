@@ -36,7 +36,7 @@ Zatim uredi vrijednosti u `config.local.php`.
 return [
     'app_username' => 'importuser',
     'app_password_hash' => '$2y$10$replaceWithRealPasswordHash',
-    'woocommerce_url' => 'https://example.com',
+    'target_domain' => 'https://dinamic.hr',
     'woocommerce_consumer_key' => 'ck_xxx',
     'woocommerce_consumer_secret' => 'cs_xxx',
     'woocommerce_verify_ssl' => true,
@@ -44,7 +44,10 @@ return [
 ];
 ```
 
-`lib/config.php` jos uvijek podrzava environment varijable `WOO_URL`, `WOO_CONSUMER_KEY` i `WOO_CONSUMER_SECRET`; ako su postavljene, imaju prednost.
+`UPP_TARGET_DOMAIN` je autoritativna ciljna domena. Zadana je
+`https://dinamic.hr`, a u Docker kontejneru koristi se
+`UPP_TARGET_DOMAIN=https://dinamic.loc`. `WOO_URL` ostaje samo prijelazni alias.
+`WOO_CONSUMER_KEY` i `WOO_CONSUMER_SECRET` imaju prednost pred lokalnom konfiguracijom.
 
 ## Datoteke koje se ne smiju commitati
 

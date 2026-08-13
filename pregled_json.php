@@ -1,5 +1,6 @@
 <?php
 require 'login_check.php';
+require __DIR__ . '/lib/web.php';
 ?>
 <!DOCTYPE html>
 <html lang="hr">
@@ -20,7 +21,7 @@ require 'login_check.php';
                 url: "get_json.php",
                 datatype: "json",
                 mtype: "GET",
-                colNames: ["kodRobe","nazivRobe","jedinicaMjere","MPC","popust","artiklNaAkciji","artiklNaRasprodaji","stanje","aktivan","gdjeSeNalazi","velicinaRame","velicinaKotaca","spol","kodGrupe","kodGrupe2","brand","PorukaObrade"],
+                colNames: ["kodRobe","nazivRobe","jedinicaMjere","MPC","popust","artiklNaAkciji","artiklNaRasprodaji","stanje","aktivan","gdjeSeNalazi","velicinaRame","velicinaKotaca","spol","kodGrupe","kodGrupe2","brand"],
                 colModel: [
                     { name: "kodRobe",width:"100px"},
                     { name: "nazivRobe",width:"200px"},
@@ -37,8 +38,7 @@ require 'login_check.php';
                     { name: "spol",width:"20px"},
                     { name: "kodGrupe",width:"50px"},
                     { name: "kodGrupe2",width:"50px"},
-                    { name: "brand",width:"50px"},
-                    { name: "PorukaObrade",width:"500px"}
+                    { name: "brand",width:"50px"}
                 ],
                 pager: "#perpage",
                 rowNum: 500,
@@ -58,6 +58,8 @@ require 'login_check.php';
     <div class="w3-bar w3-green">
         <a class="w3-bar-item w3-button" href="index.php">HOME</a>
         <a class="w3-bar-item w3-button" href="rest.php" target="_blank">Skidanje cijele JSON datoteke</a>
+        <a class="w3-bar-item w3-button w3-right" href="logout.php">Odjava</a>
+        <span class="w3-bar-item w3-right">WP domena: <?php echo upp_escape((string) upp_config('target_domain')); ?></span>
     </div>
         <table id="list_records"><tr><td></td></tr></table>
         <div id="perpage"></div>

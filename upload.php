@@ -1,90 +1,62 @@
 <?php
-require 'login_check.php';
+
+declare(strict_types=1);
+
+require __DIR__ . '/login_check.php';
+require __DIR__ . '/vendor/autoload.php';
+require __DIR__ . '/lib/web.php';
+
+use Upp\Config\Config;
+use Upp\Import\JsonFileReader;
+use Upp\Import\JsonValidator;
+use Upp\Import\ProductRecordNormalizer;
+use Upp\Inventory\StockCalculator;
+
+$message = '';
+$success = false;
+try {
+    upp_require_csrf();
+    if (!isset($_FILES['file']) || !is_array($_FILES['file'])) {
+        throw new RuntimeException('Datoteka nije poslana.');
+    }
+    $file = $_FILES['file'];
+    if (($file['error'] ?? UPLOAD_ERR_NO_FILE) !== UPLOAD_ERR_OK) {
+        throw new RuntimeException('Upload nije uspio (kod ' . (int) $file['error'] . ').');
+    }
+    $config = Config::load(__DIR__);
+    if ((int) ($file['size'] ?? 0) > (int) $config->get('upload_max_bytes', 52428800)) {
+        throw new RuntimeException('Datoteka je veća od dopuštenog ograničenja.');
+    }
+    $originalName = basename((string) ($file['name'] ?? ''));
+    if (strtolower(pathinfo($originalName, PATHINFO_EXTENSION)) !== 'json') {
+        throw new RuntimeException('Dopuštena je samo ekstenzija .json.');
+    }
+    $temporaryPath = (string) ($file['tmp_name'] ?? '');
+    $mime = (new finfo(FILEINFO_MIME_TYPE))->file($temporaryPath);
+    if (!in_array($mime, ['application/json', 'text/plain', 'application/octet-stream'], true)) {
+        throw new RuntimeException('Nedopušten MIME tip datoteke: ' . (string) $mime);
+    }
+
+    $records = (new JsonFileReader())->read($temporaryPath);
+    (new JsonValidator())->validate($records);
+    $normalizer = new ProductRecordNormalizer(new StockCalculator(), (array) $config->get('stock_included_warehouses', []));
+    foreach ($records as $index => $record) {
+        $normalizer->normalize($record, $index);
+    }
+
+    $destination = __DIR__ . '/uploads/datoteka.json';
+    if (!move_uploaded_file($temporaryPath, $destination)) {
+        throw new RuntimeException('Validiranu datoteku nije moguće spremiti.');
+    }
+    chmod($destination, 0640);
+    $success = true;
+    $message = 'Datoteka je sigurno spremljena. Broj zapisa: ' . count($records) . '.';
+} catch (Throwable $exception) {
+    http_response_code(422);
+    $message = $exception->getMessage();
+}
 ?>
-<html lang="hr">
-    <head>
-        <meta charset="UTF-8">
-        <link rel="stylesheet" href="https://www.w3schools.com/w3css/4/w3.css">
-    </head>
-    <body>
-    <?php
-        if (empty($_FILES))
-            echo "nema datoteka... ";
-        else {
-            // Provjera greške uploada
-            if ($_FILES['file']['error'] !== UPLOAD_ERR_OK) {
-                die("Greška kod uploada datoteke: " . $_FILES['file']['error']);
-            }
-            
-            if (isset($_FILES["file"]["name"])) {
-                $name = $_FILES["file"]["name"];
-                $tmp_name = $_FILES['file']['tmp_name'];
-                $error = $_FILES['file']['error'];
-
-                if (!empty($name)) {
-                    // VALIDACIJA: Provjerite veličinu datoteke
-                    $max_size = 50 * 1024 * 1024;  // 50MB limit
-                    if ($_FILES['file']['size'] > $max_size) {
-                        die("<div class='w3-panel w3-red'><h3>Greška</h3><p>Datoteka je prevelika (maksimalno 50MB)</p></div>");
-                    }
-
-                    $extension = strtolower(pathinfo($name, PATHINFO_EXTENSION));
-                    $blocked_extensions = ['php', 'phtml', 'phar', 'html', 'htm', 'js'];
-                    if ($extension !== 'json' || in_array($extension, $blocked_extensions, true)) {
-                        die("<div class='w3-panel w3-red'><h3>Greška</h3><p>Dozvoljene su samo .json datoteke</p></div>");
-                    }
-                    
-                    // VALIDACIJA: Provjerite MIME tip
-                    $finfo = finfo_open(FILEINFO_MIME_TYPE);
-                    $mime = finfo_file($finfo, $tmp_name);
-                    finfo_close($finfo);
-                    
-                    if ($mime !== 'application/json') {
-                        die("<div class='w3-panel w3-red'><h3>Greška</h3><p>Datoteka nije JSON format (detektovano: $mime)</p></div>");
-                    }
-                    
-                    // VALIDACIJA: Provjerite JSON strukturu
-                    $json_content = file_get_contents($tmp_name);
-                    $json_decoded = json_decode($json_content, true);
-                    
-                    if (json_last_error() !== JSON_ERROR_NONE) {
-                        die("<div class='w3-panel w3-red'><h3>Greška</h3><p>JSON nije validan: " . json_last_error_msg() . "</p></div>");
-                    }
-                    
-                    if (!is_array($json_decoded)) {
-                        die("<div class='w3-panel w3-red'><h3>Greška</h3><p>JSON mora sadržavati niz zapisa</p></div>");
-                    }
-                    
-                    // VALIDACIJA: Provjerite obavezna polja u svakom zapisu
-                    $required_fields = ['kodRobe', 'nazivRobe', 'MPC', 'stanje'];
-                    foreach ($json_decoded as $idx => $record) {
-                        if (!is_array($record)) {
-                            die("<div class='w3-panel w3-red'><h3>Greška</h3><p>Zapis #$idx nije objekat</p></div>");
-                        }
-                        foreach ($required_fields as $field) {
-                            if (!isset($record[$field])) {
-                                die("<div class='w3-panel w3-red'><h3>Greška</h3><p>Zapis #$idx nedostaje obavezno polje: <strong>$field</strong></p></div>");
-                            }
-                        }
-                    }
-                    
-                    // Svi validacijski testovi su prošli - čuva datoteku
-                    $location = __DIR__.'/uploads/';
-                    if (move_uploaded_file($tmp_name, $location . 'datoteka.json')) {
-                        echo '<div class="w3-bar w3-green">';
-                        echo '<a class="w3-bar-item w3-button" href="/upp/index.php">Početna stranica</a>';
-                        echo '<a class="w3-bar-item w3-button" href="import_03x.php">Import prebačene datoteke</a>';
-                        echo '<a class="w3-bar-item w3-button" href="pregled_json.php">Pregled prebačene datoteke</a>';
-                        echo '</div>';
-                        echo '<h1>✓ Datoteka je uspješno uploadovana i validirana</h1>';
-                        echo '<p>Broj zapisa: ' . count($json_decoded) . '</p>';
-                    }
-
-                } else {
-                    echo '<a href="/upp/index.php">Početna stranica</a>';
-                }
-            }
-        }
-        ?>
-    </body>
-</html>
+<!doctype html><html lang="hr"><head><meta charset="utf-8"><title>Upload</title><link rel="stylesheet" href="https://www.w3schools.com/w3css/4/w3.css"></head>
+<body><main class="w3-container"><div class="w3-panel <?= $success ? 'w3-green' : 'w3-red' ?>"><p><?= upp_escape($message) ?></p></div>
+<?php if ($success): ?><a class="w3-button" href="import_03x.php">Pokreni import</a><a class="w3-button" href="pregled_json.php">Pregledaj datoteku</a><?php else: ?><a class="w3-button" href="index.php">Natrag</a><?php endif; ?>
+</main></body></html>

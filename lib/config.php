@@ -1,38 +1,17 @@
 <?php
 
-function upp_config($key = null, $default = null)
+declare(strict_types=1);
+
+require_once __DIR__ . '/../vendor/autoload.php';
+
+use Upp\Config\Config;
+
+function upp_config(?string $key = null, mixed $default = null): mixed
 {
     static $config = null;
-
-    if ($config === null) {
-        $exampleFile = __DIR__ . '/../config.example.php';
-        $localFile = __DIR__ . '/../config.local.php';
-
-        $config = file_exists($exampleFile) ? require $exampleFile : [];
-        if (file_exists($localFile)) {
-            $localConfig = require $localFile;
-            if (is_array($localConfig)) {
-                $config = array_merge($config, $localConfig);
-            }
-        }
-
-        $envMap = [
-            'WOO_URL' => 'woocommerce_url',
-            'WOO_CONSUMER_KEY' => 'woocommerce_consumer_key',
-            'WOO_CONSUMER_SECRET' => 'woocommerce_consumer_secret',
-        ];
-
-        foreach ($envMap as $envName => $configKey) {
-            $value = getenv($envName);
-            if ($value !== false && $value !== '') {
-                $config[$configKey] = $value;
-            }
-        }
-    }
-
+    $config ??= Config::load(dirname(__DIR__))->all();
     if ($key === null) {
         return $config;
     }
-
     return array_key_exists($key, $config) ? $config[$key] : $default;
 }

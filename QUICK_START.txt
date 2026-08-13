@@ -9,7 +9,8 @@
   $ nano .env
   
   Popuni:
-  - WOO_URL=https://dinamic.hr
+  - UPP_TARGET_DOMAIN=https://dinamic.hr
+    (u Docker kontejneru: UPP_TARGET_DOMAIN=https://dinamic.loc)
   - WOO_CONSUMER_KEY=ck_xxxx... (iz WordPress Admin)
   - WOO_CONSUMER_SECRET=cs_xxxx... (iz WordPress Admin)
 
@@ -132,4 +133,3 @@ O: $ tail -f upp_log.txt
 - ISSUES.md       → Registrovani problemi i rešenja
 - CHANGELOG.md    → Šta je urađeno
 - .env.example    → Template za konfiguraciju
-

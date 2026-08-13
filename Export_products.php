@@ -1,39 +1,31 @@
 <?php
-/**
- * User: dd
- * Date: 26.05.2018.
- */
+declare(strict_types=1);
 require __DIR__ . '/login_check.php';
-require __DIR__ . '/lib/config.php';
-
-// biblioteka vlastitih funkcija
-require_once __DIR__ . "/lib/upplib.php";
-
-// WooCommerce
 require __DIR__ . '/vendor/autoload.php';
-use Automattic\WooCommerce\Client;
-// WP REST API integration (WooCommerce 2.6 or later)
+
+use Upp\Config\Config;
+use Upp\Logging\ImportLogger;
+use Upp\WooCommerce\RestWooCommerceGateway;
+
 try {
-    $woocommerce = new Client(
-        upp_config('woocommerce_url'),
-        upp_config('woocommerce_consumer_key'),
-        upp_config('woocommerce_consumer_secret'),
-        [
-            //'wp_api' => true,
-            'verify_ssl' => (bool) upp_config('woocommerce_verify_ssl', true)
-        ]
+    $config = Config::load(__DIR__);
+    $gateway = RestWooCommerceGateway::fromCredentials(
+        UPP_TARGET_DOMAIN,
+        (string) $config->get('woocommerce_consumer_key', ''),
+        (string) $config->get('woocommerce_consumer_secret', ''),
+        (bool) $config->get('woocommerce_verify_ssl', true),
     );
+    $gateway->checkConnection();
+    $products = [];
+    $page = 1;
+    do {
+        $batch = $gateway->productsPage($page++);
+        array_push($products, ...$batch);
+    } while (count($batch) === 100);
+    header('Content-Type: application/json; charset=utf-8');
+    header('Content-Disposition: attachment; filename="woocommerce-products.json"');
+    echo json_encode($products, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR);
+} catch (Throwable $exception) {
+    http_response_code(502);
+    echo ImportLogger::sanitize($exception->getMessage());
 }
-catch (Exception $e) {
-    echo '#greska kod spajanja';
-    exit('[#*#'.$e->getMessage().']');
-}
-
-$a=$woocommerce->get('products/');
-if (isset($a) and count($a['products'])):
-    // pronađeni su svi artikli - zapis ih u JSON datoteku
-    $encodedString = json_encode($a);
-    file_put_contents(__DIR__ . "/uploads/svi_artikli.json", $encodedString);
-endif;
-
-?>

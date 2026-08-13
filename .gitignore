@@ -30,6 +30,7 @@ error_log
 # IDE
 .vscode/
 .idea/
+.phpunit.cache/
 *.swp
 *.swo
 
@@ -39,4 +40,3 @@ Thumbs.db
 
 # Composer
 vendor/
-composer.lock

@@ -1,0 +1,28 @@
+.upp-warehouse-stock {
+    clear: both;
+    margin: 1.5rem 0;
+}
+
+.upp-warehouse-stock h2 {
+    font-size: 1.15rem;
+    margin-bottom: .75rem;
+}
+
+.upp-warehouse-stock ul {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+}
+
+.upp-warehouse-stock li {
+    align-items: center;
+    border-bottom: 1px solid #e5e5e5;
+    display: flex;
+    gap: 1rem;
+    justify-content: space-between;
+    padding: .55rem 0;
+}
+
+.upp-warehouse-stock li strong {
+    white-space: nowrap;
+}
