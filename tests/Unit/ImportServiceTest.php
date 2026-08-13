@@ -53,7 +53,7 @@ final class ImportServiceTest extends TestCase
     {
         $gateway = new FakeGateway();
         $gateway->categories['scott'] = 9;
-        $gateway->productsBySku['UPDATE'] = [['id' => 7, 'sku' => 'UPDATE', 'type' => 'simple']];
+        $gateway->resolvedBySku['UPDATE'] = ['id' => 7, 'sku' => 'UPDATE', 'type' => 'simple', 'parent_id' => null];
         $path = $this->records([$this->record('CREATE'), $this->record('UPDATE')]);
         $result = $this->service($gateway)->import($path);
         unlink($path);
@@ -85,13 +85,10 @@ final class ImportServiceTest extends TestCase
     public function testVariationIsFoundBySkuWithoutParentIdAndUpdated(): void
     {
         $gateway = new FakeGateway();
-        $gateway->productPages[1] = [
-            ['id' => 44, 'sku' => 'PARENT', 'type' => 'variable'],
-            ['id' => 45, 'sku' => 'SIMPLE', 'type' => 'simple'],
-        ];
+        $gateway->resolvedBySku['VAR-M'] = ['id' => 81, 'sku' => 'VAR-M', 'type' => 'variation', 'parent_id' => 44];
         $gateway->variationPages[44][1] = [
-            ['id' => 81, 'sku' => 'VAR-M'],
-            ['id' => 82, 'sku' => 'OTHER'],
+            ['id' => 81, 'sku' => 'VAR-M', 'stock_quantity' => 6],
+            ['id' => 82, 'sku' => 'OTHER', 'stock_quantity' => 3],
         ];
         $path = $this->records([$this->record('VAR-M', true, 6)]);
 
@@ -106,41 +103,50 @@ final class ImportServiceTest extends TestCase
         self::assertArrayNotHasKey('categories', $gateway->updatedPayloads['VAR-M']);
         self::assertArrayNotHasKey('attributes', $gateway->updatedPayloads['VAR-M']);
         self::assertArrayNotHasKey('VAR-M', $gateway->createdPayloads);
+        self::assertSame(44, $gateway->updatedProducts[0]['id']);
+        self::assertSame([
+            ['key' => 'upp_variations_total_stock', 'value' => 9],
+        ], $gateway->updatedProducts[0]['payload']['meta_data']);
+        self::assertArrayNotHasKey('manage_stock', $gateway->updatedProducts[0]['payload']);
     }
 
-    public function testVariationIndexDetectsDuplicateSkuAcrossParents(): void
+    public function testSimpleResolverResultUsesProductUpdate(): void
     {
         $gateway = new FakeGateway();
-        $gateway->productPages[1] = [
-            ['id' => 44, 'type' => 'variable'],
-            ['id' => 55, 'type' => 'variable'],
-        ];
-        $gateway->variationPages[44][1] = [['id' => 81, 'sku' => 'DUP-VAR']];
-        $gateway->variationPages[55][1] = [['id' => 91, 'sku' => 'DUP-VAR']];
-        $path = $this->records([$this->record('DUP-VAR')]);
+        $gateway->resolvedBySku['SIMPLE'] = ['id' => 100, 'sku' => 'SIMPLE', 'type' => 'simple', 'parent_id' => null];
+        $path = $this->records([$this->record('SIMPLE')]);
 
         $result = $this->service($gateway)->import($path);
         unlink($path);
 
-        self::assertSame('error', $result['results'][0]->operation);
-        self::assertStringContainsString('više WooCommerce proizvoda', $result['results'][0]->message);
+        self::assertSame('update', $result['results'][0]->operation);
+        self::assertSame(100, $gateway->updatedProducts[0]['id']);
+        self::assertSame('SIMPLE', $gateway->updatedProducts[0]['sku']);
     }
 
-    public function testNoOneAndDuplicateSkuResponses(): void
+    public function testVariationStockPayloadForZeroAndPositiveStock(): void
     {
         $gateway = new FakeGateway();
-        $gateway->productsBySku['DUP'] = [['id' => 1, 'sku' => 'DUP'], ['id' => 2, 'sku' => 'DUP']];
-        $path = $this->records([$this->record('DUP')]);
+        $gateway->resolvedBySku['VAR-5'] = ['id' => 102, 'sku' => 'VAR-5', 'type' => 'variation', 'parent_id' => 100];
+        $gateway->resolvedBySku['VAR-0'] = ['id' => 103, 'sku' => 'VAR-0', 'type' => 'variation', 'parent_id' => 100];
+        $path = $this->records([$this->record('VAR-5', true, 5), $this->record('VAR-0', true, 0)]);
         $result = $this->service($gateway)->import($path);
         unlink($path);
-        self::assertSame('error', $result['results'][0]->operation);
-        self::assertStringContainsString('više WooCommerce proizvoda', $result['results'][0]->message);
+
+        self::assertSame(2, $result['summary']['updated']);
+        self::assertSame(['manage_stock' => true, 'stock_quantity' => 5, 'stock_status' => 'instock'], array_intersect_key(
+            $gateway->updatedPayloads['VAR-5'], array_flip(['manage_stock', 'stock_quantity', 'stock_status'])
+        ));
+        self::assertSame(['manage_stock' => true, 'stock_quantity' => 0, 'stock_status' => 'outofstock'], array_intersect_key(
+            $gateway->updatedPayloads['VAR-0'], array_flip(['manage_stock', 'stock_quantity', 'stock_status'])
+        ));
+        self::assertCount(1, $gateway->updatedProducts);
     }
 
     public function testBusinessStatusRulesAndUnknownMappings(): void
     {
         $gateway = new FakeGateway();
-        $gateway->productsBySku['INACTIVE_EXISTING'] = [['id' => 4, 'sku' => 'INACTIVE_EXISTING', 'type' => 'simple']];
+        $gateway->resolvedBySku['INACTIVE_EXISTING'] = ['id' => 4, 'sku' => 'INACTIVE_EXISTING', 'type' => 'simple', 'parent_id' => null];
         $records = [
             $this->record('ACTIVE_ZERO', true, 0),
             $this->record('INACTIVE_NEW', false, 0),

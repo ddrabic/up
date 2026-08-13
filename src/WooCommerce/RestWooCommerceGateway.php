@@ -57,6 +57,29 @@ final class RestWooCommerceGateway implements WooCommerceGatewayInterface
         }
     }
 
+    public function resolveProductBySku(string $sku): ?array
+    {
+        $endpoint = 'upp/product-by-sku';
+        $resolved = $this->request('GET', $endpoint, $sku, fn () => $this->client->get($endpoint, ['sku' => $sku]));
+        if (!is_array($resolved) || array_is_list($resolved) || !array_key_exists('found', $resolved)) {
+            throw new GatewayException('Neispravan REST odgovor pri razrješavanju SKU-a.');
+        }
+        if ($resolved['found'] !== true) {
+            return null;
+        }
+        if (!is_numeric($resolved['id'] ?? null) || !is_string($resolved['type'] ?? null)) {
+            throw new GatewayException('REST resolver vratio je nepotpune podatke proizvoda.');
+        }
+
+        $parentId = $resolved['parent_id'] ?? null;
+        return [
+            'id' => (int) $resolved['id'],
+            'sku' => (string) ($resolved['sku'] ?? $sku),
+            'type' => $resolved['type'],
+            'parent_id' => is_numeric($parentId) ? (int) $parentId : null,
+        ];
+    }
+
     public function findProductsBySku(string $sku): array
     {
         $products = $this->request('GET', 'products', $sku, fn () => $this->client->get('products', ['sku' => $sku, 'per_page' => 100]));

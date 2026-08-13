@@ -16,9 +16,9 @@ final class VariationService
 
     public function update(ProductRecord $record, array $existing, array $payload): array
     {
-        $parentId = $existing['parent_id'] ?? $record->parentProductId;
+        $parentId = $existing['parent_id'] ?? null;
         if (!is_numeric($parentId) || (int) $parentId < 1) {
-            throw new RuntimeException('Varijacija nema pouzdano mapiran parentProductId; heurističko traženje roditelja nije dopušteno.');
+            throw new RuntimeException('WooCommerce resolver nije vratio valjan parent_id varijacije.');
         }
         // Polja proizvoda i struktura njegovih atributa nisu valjan payload za
         // endpoint varijacije. Ovdje sinkroniziramo cijenu i zalihu, a postojeće

@@ -14,11 +14,8 @@ use Upp\WooCommerce\WooCommerceGatewayInterface;
 
 final class ImportService
 {
-    /** @var array<string, list<array<string, mixed>>>|null */
-    private ?array $variationIndex = null;
-
-    /** @var array<string, true> */
-    private array $requestedSkus = [];
+    /** @var array<int, true> */
+    private array $updatedVariationParentIds = [];
 
     public function __construct(
         private readonly JsonFileReader $reader,
@@ -45,11 +42,7 @@ final class ImportService
             $records[] = $this->normalizer->normalize($item, $index);
         }
 
-        $this->variationIndex = null;
-        $this->requestedSkus = [];
-        foreach ($records as $record) {
-            $this->requestedSkus[$record->sku] = true;
-        }
+        $this->updatedVariationParentIds = [];
 
         // Nijedan gateway poziv ne smije se dogoditi prije potpune validacije/normalizacije.
         $this->gateway->checkConnection();
@@ -62,6 +55,7 @@ final class ImportService
                 $onResult($result);
             }
         }
+        $this->updateVariationParentStocks();
 
         $summary = $this->summarize($results, count($records), $startedAt, gmdate(DATE_ATOM));
         $this->logger?->summary($summary);
@@ -72,16 +66,7 @@ final class ImportService
     {
         $warnings = [];
         try {
-            $products = $record->parentProductId !== null
-                ? $this->gateway->findVariationsBySku($record->parentProductId, $record->sku)
-                : $this->gateway->findProductsBySku($record->sku);
-            if ($record->parentProductId === null && $products === []) {
-                $products = $this->variationsBySku($record->sku);
-            }
-            if (count($products) > 1) {
-                throw new \RuntimeException('Kritična greška: više WooCommerce proizvoda ima isti SKU.');
-            }
-            $existing = $products[0] ?? null;
+            $existing = $this->gateway->resolveProductBySku($record->sku);
             if (!$record->active && $record->totalStock > 0) {
                 return $this->result($record, 'skipped_with_warning', $existing['id'] ?? null, null, 'Neaktivan proizvod ima pozitivnu zalihu; nije promijenjen.');
             }
@@ -110,9 +95,12 @@ final class ImportService
             }
 
             $payload = $this->payloadFactory->update($record, $categoryIds, $brandName);
-            $response = $record->parentProductId !== null || ($existing['type'] ?? 'simple') === 'variation'
-                ? (new VariationService($this->gateway))->update($record, $existing, $payload)
-                : $this->gateway->updateProduct((int) $existing['id'], $payload, $record->sku);
+            if (($existing['type'] ?? '') === 'variation') {
+                $response = (new VariationService($this->gateway))->update($record, $existing, $payload);
+                $this->updatedVariationParentIds[(int) $existing['parent_id']] = true;
+            } else {
+                $response = $this->gateway->updateProduct((int) $existing['id'], $payload, $record->sku);
+            }
             return $this->result($record, 'update', isset($response['id']) ? (int) $response['id'] : (int) $existing['id'], 200, $this->message('Proizvod je ažuriran.', $warnings));
         } catch (Throwable $exception) {
             $status = $exception instanceof GatewayException ? $exception->httpStatus : null;
@@ -120,45 +108,28 @@ final class ImportService
         }
     }
 
-    /** @return list<array<string, mixed>> */
-    private function variationsBySku(string $sku): array
+    private function updateVariationParentStocks(): void
     {
-        if ($this->variationIndex === null) {
-            $this->variationIndex = $this->buildVariationIndex();
-        }
-        return $this->variationIndex[$sku] ?? [];
-    }
-
-    /** @return array<string, list<array<string, mixed>>> */
-    private function buildVariationIndex(): array
-    {
-        $index = [];
         $perPage = 100;
-        $productPage = 1;
-        do {
-            $products = $this->gateway->productsPage($productPage++, $perPage);
-            foreach ($products as $product) {
-                if (($product['type'] ?? null) !== 'variable' || !is_numeric($product['id'] ?? null)) {
-                    continue;
+        foreach (array_keys($this->updatedVariationParentIds) as $parentId) {
+            $totalStock = 0.0;
+            $page = 1;
+            do {
+                $variations = $this->gateway->variationsPage($parentId, $page++, $perPage);
+                foreach ($variations as $variation) {
+                    $quantity = $variation['stock_quantity'] ?? 0;
+                    $totalStock += is_numeric($quantity) ? (float) $quantity : 0.0;
                 }
-                $parentId = (int) $product['id'];
-                $variationPage = 1;
-                do {
-                    $variations = $this->gateway->variationsPage($parentId, $variationPage++, $perPage);
-                    foreach ($variations as $variation) {
-                        $sku = trim((string) ($variation['sku'] ?? ''));
-                        if ($sku === '' || !isset($this->requestedSkus[$sku])) {
-                            continue;
-                        }
-                        $variation['type'] = 'variation';
-                        $variation['parent_id'] = $parentId;
-                        $index[$sku][] = $variation;
-                    }
-                } while (count($variations) === $perPage);
-            }
-        } while (count($products) === $perPage);
+            } while (count($variations) === $perPage);
 
-        return $index;
+            $stock = floor($totalStock) === $totalStock ? (int) $totalStock : $totalStock;
+            $this->gateway->updateProduct($parentId, [
+                'meta_data' => [[
+                    'key' => 'upp_variations_total_stock',
+                    'value' => $stock,
+                ]],
+            ], '');
+        }
     }
 
     /** @return list<int>|null */

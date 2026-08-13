@@ -57,6 +57,6 @@ try {
 }
 ?>
 <!doctype html><html lang="hr"><head><meta charset="utf-8"><title>Upload</title><link rel="stylesheet" href="https://www.w3schools.com/w3css/4/w3.css"></head>
-<body><main class="w3-container"><div class="w3-panel <?= $success ? 'w3-green' : 'w3-red' ?>"><p><?= upp_escape($message) ?></p></div>
+<body><main class="w3-container"><div class="w3-panel <?= $success ? 'w3-purple' : 'w3-red' ?>"><p><?= upp_escape($message) ?></p></div>
 <?php if ($success): ?><a class="w3-button" href="import_03x.php">Pokreni import</a><a class="w3-button" href="pregled_json.php">Pregledaj datoteku</a><?php else: ?><a class="w3-button" href="index.php">Natrag</a><?php endif; ?>
 </main></body></html>

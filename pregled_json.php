@@ -55,7 +55,7 @@ require __DIR__ . '/lib/web.php';
 
 </head>
     <body>
-    <div class="w3-bar w3-green">
+    <div class="w3-bar w3-purple">
         <a class="w3-bar-item w3-button" href="index.php">HOME</a>
         <a class="w3-bar-item w3-button" href="rest.php" target="_blank">Skidanje cijele JSON datoteke</a>
         <a class="w3-bar-item w3-button w3-right" href="logout.php">Odjava</a>

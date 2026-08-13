@@ -57,6 +57,43 @@ final class RestGatewayTest extends TestCase
         self::assertCount(1, $one->findProductsBySku('SKU'));
     }
 
+    public function testSkuResolverReturnsSimpleAndVariationMetadata(): void
+    {
+        $simpleClient = new StubClient([[
+            'found' => true, 'id' => 100, 'sku' => 'SIMPLE', 'type' => 'simple', 'parent_id' => null,
+        ]]);
+        $simple = new RestWooCommerceGateway($simpleClient);
+        self::assertSame(
+            ['id' => 100, 'sku' => 'SIMPLE', 'type' => 'simple', 'parent_id' => null],
+            $simple->resolveProductBySku('SIMPLE'),
+        );
+        self::assertSame(['GET', 'upp/product-by-sku', ['sku' => 'SIMPLE']], $simpleClient->requests[0]);
+
+        $variation = new RestWooCommerceGateway(new StubClient([[
+            'found' => true, 'id' => 102, 'sku' => 'VAR', 'type' => 'variation', 'parent_id' => 100,
+        ]]));
+        self::assertSame(
+            ['id' => 102, 'sku' => 'VAR', 'type' => 'variation', 'parent_id' => 100],
+            $variation->resolveProductBySku('VAR'),
+        );
+
+        $missing = new RestWooCommerceGateway(new StubClient([['found' => false]]));
+        self::assertNull($missing->resolveProductBySku('MISSING'));
+    }
+
+    public function testVariationUpdateUsesParentAndVariationEndpoint(): void
+    {
+        $client = new StubClient([['id' => 102, 'sku' => 'VAR']]);
+        $gateway = new RestWooCommerceGateway($client);
+
+        $gateway->updateVariation(100, 102, ['stock_quantity' => 5], 'VAR');
+
+        self::assertSame(
+            ['PUT', 'products/100/variations/102', ['stock_quantity' => 5]],
+            $client->requests[0],
+        );
+    }
+
     public function testVariationPageReturnsVariationCollection(): void
     {
         $gateway = new RestWooCommerceGateway(new StubClient([[
@@ -100,6 +137,7 @@ final class RestGatewayTest extends TestCase
 final class StubClient extends Client
 {
     public int $calls = 0;
+    public array $requests = [];
 
     public function __construct(private array $responses)
     {
@@ -108,6 +146,16 @@ final class StubClient extends Client
     public function get($endpoint, $parameters = [])
     {
         $this->calls++;
+        $this->requests[] = ['GET', $endpoint, $parameters];
+        $response = array_shift($this->responses);
+        if ($response instanceof \Throwable) throw $response;
+        return $response;
+    }
+
+    public function put($endpoint, $data)
+    {
+        $this->calls++;
+        $this->requests[] = ['PUT', $endpoint, $data];
         $response = array_shift($this->responses);
         if ($response instanceof \Throwable) throw $response;
         return $response;

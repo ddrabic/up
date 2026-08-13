@@ -12,7 +12,7 @@ $csrf = upp_csrf_token();
     <link rel="stylesheet" href="https://www.w3schools.com/w3css/4/w3.css">
 </head>
 <body>
-<nav class="w3-bar w3-green">
+<nav class="w3-bar w3-purple">
     <a class="w3-bar-item w3-button" href="index.php">Početna</a>
     <a class="w3-bar-item w3-button" href="pregled_json.php">Pregled JSON-a</a>
     <a class="w3-bar-item w3-button w3-right" href="logout.php">Odjava</a>

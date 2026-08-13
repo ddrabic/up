@@ -2,7 +2,7 @@
 /**
  * Plugin Name: UPP Warehouse Stock
  * Description: Sprema i prikazuje ERP stanje artikla po poslovnicama/skladištima.
- * Version: 1.0.1
+ * Version: 1.0.3
  * Author: UPP
  * Requires at least: 6.4
  * Requires PHP: 7.4
@@ -28,11 +28,47 @@ final class UPP_Warehouse_Stock
 
     public static function boot(): void
     {
+        add_action('rest_api_init', [self::class, 'register_rest_routes']);
         add_filter('woocommerce_rest_pre_insert_product_object', [self::class, 'replace_imported_stock'], 10, 3);
         add_filter('woocommerce_rest_pre_insert_product_variation_object', [self::class, 'replace_imported_stock'], 10, 3);
         add_filter('woocommerce_available_variation', [self::class, 'variation_data'], 10, 3);
         add_action('woocommerce_single_product_summary', [self::class, 'render_product_stock'], 25);
         add_action('wp_enqueue_scripts', [self::class, 'enqueue_assets']);
+    }
+
+    public static function register_rest_routes(): void
+    {
+        register_rest_route('wc/v3', '/upp/product-by-sku', [
+            'methods' => WP_REST_Server::READABLE,
+            'callback' => [self::class, 'resolve_product_by_sku'],
+            'permission_callback' => static fn (): bool => current_user_can('manage_woocommerce'),
+            'args' => [
+                'sku' => [
+                    'required' => true,
+                    'type' => 'string',
+                    'sanitize_callback' => 'sanitize_text_field',
+                ],
+            ],
+        ]);
+    }
+
+    public static function resolve_product_by_sku(WP_REST_Request $request): WP_REST_Response
+    {
+        $sku = trim((string) $request->get_param('sku'));
+        $id = $sku === '' ? 0 : (int) wc_get_product_id_by_sku($sku);
+        $product = $id > 0 ? wc_get_product($id) : false;
+        if (!$product instanceof WC_Product) {
+            return new WP_REST_Response(['found' => false], 200);
+        }
+
+        $parentId = (int) $product->get_parent_id();
+        return new WP_REST_Response([
+            'found' => true,
+            'id' => $product->get_id(),
+            'sku' => $product->get_sku(),
+            'type' => $product->get_type(),
+            'parent_id' => $parentId > 0 ? $parentId : null,
+        ], 200);
     }
 
     public static function replace_imported_stock($product, WP_REST_Request $request, bool $creating)
@@ -83,8 +119,8 @@ final class UPP_Warehouse_Stock
             return;
         }
         $url = plugin_dir_url(__FILE__);
-        wp_enqueue_style('upp-warehouse-stock', $url . 'assets/warehouse-stock.css', [], '1.0.1');
-        wp_enqueue_script('upp-warehouse-stock', $url . 'assets/warehouse-stock.js', ['jquery'], '1.0.1', true);
+        wp_enqueue_style('upp-warehouse-stock', $url . 'assets/warehouse-stock.css', [], '1.0.3');
+        wp_enqueue_script('upp-warehouse-stock', $url . 'assets/warehouse-stock.js', ['jquery'], '1.0.3', true);
     }
 
     private static function stock_list_html($product): string

@@ -14,7 +14,7 @@ final class VariationServiceTest extends TestCase
     public function testVariationRequiresReliableParent(): void
     {
         $this->expectException(\RuntimeException::class);
-        $this->expectExceptionMessage('parentProductId');
+        $this->expectExceptionMessage('parent_id');
         (new VariationService(new FakeGateway()))->update($this->record(), ['id' => 12, 'type' => 'variation'], []);
     }
 

@@ -4,6 +4,7 @@
 }
 
 .upp-warehouse-stock h2 {
+    color: #9c27b0;
     font-size: 1.15rem;
     margin-bottom: .75rem;
 }
@@ -24,5 +25,6 @@
 }
 
 .upp-warehouse-stock li strong {
+    color: #9c27b0;
     white-space: nowrap;
 }

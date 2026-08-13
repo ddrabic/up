@@ -3,7 +3,7 @@ Contributors: upp
 Requires at least: 6.4
 Requires PHP: 7.4
 WC requires at least: 8.0
-Stable tag: 1.0.1
+Stable tag: 1.0.3
 License: GPLv2 or later
 
 Sprema ERP snapshot zalihe po poslovnicama i prikazuje dostupne lokacije na stranici proizvoda.

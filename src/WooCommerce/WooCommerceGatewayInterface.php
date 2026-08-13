@@ -8,6 +8,9 @@ interface WooCommerceGatewayInterface
 {
     public function checkConnection(): void;
 
+    /** @return array{id: int, sku: string, type: string, parent_id: int|null}|null */
+    public function resolveProductBySku(string $sku): ?array;
+
     /** @return list<array<string, mixed>> */
     public function productsPage(int $page, int $perPage = 100): array;
 

@@ -10,7 +10,7 @@ $csrf = upp_csrf_token();
     <link rel="stylesheet" href="https://www.w3schools.com/w3css/4/w3.css">
 </head>
 <body>
-<div class="w3-bar w3-green">
+<div class="w3-bar w3-purple">
     <a class="w3-bar-item w3-button" href="pregled_json.php">Pregled JSON datoteke</a>
     <a class="w3-bar-item w3-button" href="import_03x.php">Import podataka iz JSON datoteke</a>
     <a class="w3-bar-item w3-button w3-right" href="logout.php">Odjava</a>
@@ -21,7 +21,7 @@ $csrf = upp_csrf_token();
     <h1>Učitavanje datoteke</h1>
     <div>
         <p>Odaberi JSON datoteku:</p>
-        <input type="file" name="file" accept=".json,application/json,text/plain" style="color: green" required />
+        <input type="file" name="file" accept=".json,application/json,text/plain" style="color: #9c27b0" required />
     </div>
     </br>
     <div>
