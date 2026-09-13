@@ -1,8 +1,8 @@
 <?php
 /**
  * Plugin Name: UPP Warehouse Stock
- * Description: Sprema i prikazuje ERP stanje artikla po poslovnicama/skladištima.
- * Version: 1.0.3
+ * Description: Sprema ERP stanje artikla po poslovnicama/skladištima uz opcionalni prikaz kupcima.
+ * Version: 1.1.0
  * Author: UPP
  * Requires at least: 6.4
  * Requires PHP: 7.4
@@ -14,7 +14,9 @@ defined('ABSPATH') || exit;
 
 final class UPP_Warehouse_Stock
 {
+    private const VERSION = '1.1.0';
     private const META_KEY = 'upp_warehouse_stock';
+    private const VISIBILITY_OPTION = 'upp_warehouse_stock_visible';
 
     /** @var array<string, array{name: string, address: string}> */
     private const LOCATIONS = [
@@ -31,9 +33,88 @@ final class UPP_Warehouse_Stock
         add_action('rest_api_init', [self::class, 'register_rest_routes']);
         add_filter('woocommerce_rest_pre_insert_product_object', [self::class, 'replace_imported_stock'], 10, 3);
         add_filter('woocommerce_rest_pre_insert_product_variation_object', [self::class, 'replace_imported_stock'], 10, 3);
+        add_action('admin_init', [self::class, 'register_settings']);
+        add_action('admin_menu', [self::class, 'register_settings_page']);
+
+        // Frontend hookovi nisu potrebni dok je prikaz isključen. Import ostaje aktivan.
+        if (!self::is_stock_visible()) {
+            return;
+        }
+
         add_filter('woocommerce_available_variation', [self::class, 'variation_data'], 10, 3);
         add_action('woocommerce_single_product_summary', [self::class, 'render_product_stock'], 25);
         add_action('wp_enqueue_scripts', [self::class, 'enqueue_assets']);
+    }
+
+    public static function activate(): void
+    {
+        // Nova instalacija ne prikazuje zalihu dok korisnik to izričito ne uključi.
+        add_option(self::VISIBILITY_OPTION, 'no');
+    }
+
+    public static function register_settings(): void
+    {
+        register_setting('upp_warehouse_stock', self::VISIBILITY_OPTION, [
+            'type' => 'string',
+            'sanitize_callback' => static function ($value): string {
+                return $value === 'yes' ? 'yes' : 'no';
+            },
+            'default' => 'no',
+        ]);
+
+        add_settings_section(
+            'upp_warehouse_stock_display',
+            __('Prikaz zaliha', 'upp-warehouse-stock'),
+            static function (): void {
+                echo '<p>' . esc_html__('Ova postavka utječe samo na prikaz kupcima. REST ruta i import zaliha uvijek ostaju aktivni.', 'upp-warehouse-stock') . '</p>';
+            },
+            'upp-warehouse-stock'
+        );
+
+        add_settings_field(
+            self::VISIBILITY_OPTION,
+            __('Vidljivost na proizvodu', 'upp-warehouse-stock'),
+            [self::class, 'render_visibility_field'],
+            'upp-warehouse-stock',
+            'upp_warehouse_stock_display'
+        );
+    }
+
+    public static function register_settings_page(): void
+    {
+        add_submenu_page(
+            'woocommerce',
+            __('UPP zalihe', 'upp-warehouse-stock'),
+            __('UPP zalihe', 'upp-warehouse-stock'),
+            'manage_woocommerce',
+            'upp-warehouse-stock',
+            [self::class, 'render_settings_page']
+        );
+    }
+
+    public static function render_visibility_field(): void
+    {
+        echo '<label>';
+        echo '<input type="checkbox" name="' . esc_attr(self::VISIBILITY_OPTION) . '" value="yes" '
+            . checked(self::is_stock_visible(), true, false) . '> ';
+        echo esc_html__('Prikaži dostupnost po poslovnicama na javnoj stranici proizvoda', 'upp-warehouse-stock');
+        echo '</label>';
+    }
+
+    public static function render_settings_page(): void
+    {
+        if (!current_user_can('manage_woocommerce')) {
+            return;
+        }
+
+        echo '<div class="wrap">';
+        echo '<h1>' . esc_html__('UPP zalihe', 'upp-warehouse-stock') . '</h1>';
+        echo '<form action="options.php" method="post">';
+        settings_fields('upp_warehouse_stock');
+        do_settings_sections('upp-warehouse-stock');
+        submit_button();
+        echo '</form>';
+        echo '</div>';
     }
 
     public static function register_rest_routes(): void
@@ -119,8 +200,13 @@ final class UPP_Warehouse_Stock
             return;
         }
         $url = plugin_dir_url(__FILE__);
-        wp_enqueue_style('upp-warehouse-stock', $url . 'assets/warehouse-stock.css', [], '1.0.3');
-        wp_enqueue_script('upp-warehouse-stock', $url . 'assets/warehouse-stock.js', ['jquery'], '1.0.3', true);
+        wp_enqueue_style('upp-warehouse-stock', $url . 'assets/warehouse-stock.css', [], self::VERSION);
+        wp_enqueue_script('upp-warehouse-stock', $url . 'assets/warehouse-stock.js', ['jquery'], self::VERSION, true);
+    }
+
+    private static function is_stock_visible(): bool
+    {
+        return get_option(self::VISIBILITY_OPTION, 'no') === 'yes';
     }
 
     private static function stock_list_html($product): string
@@ -168,6 +254,8 @@ final class UPP_Warehouse_Stock
         return $stock;
     }
 }
+
+register_activation_hook(__FILE__, [UPP_Warehouse_Stock::class, 'activate']);
 
 add_action('plugins_loaded', static function (): void {
     if (class_exists('WooCommerce')) {

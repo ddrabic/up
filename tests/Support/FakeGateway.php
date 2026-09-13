@@ -10,6 +10,7 @@ final class FakeGateway implements WooCommerceGatewayInterface
 {
     public int $calls = 0;
     public array $productsBySku = [];
+    public array $productDetails = [];
     public array $resolvedBySku = [];
     public array $productPages = [];
     public array $variationPages = [];
@@ -29,6 +30,12 @@ final class FakeGateway implements WooCommerceGatewayInterface
     {
         $this->calls++;
         return $this->resolvedBySku[$sku] ?? null;
+    }
+
+    public function getProduct(int $id, string $sku): array
+    {
+        $this->calls++;
+        return $this->productDetails[$id] ?? ($this->resolvedBySku[$sku] + ['name' => 'Postojeći naziv', 'categories' => []]);
     }
 
     public function findProductsBySku(string $sku): array

@@ -64,6 +64,45 @@ final class ImportServiceTest extends TestCase
         self::assertSame(1, $result['summary']['updated']);
     }
 
+    public function testErpNameIsUsedOnlyWhenCreatingProducts(): void
+    {
+        $gateway = new FakeGateway();
+        $gateway->resolvedBySku['EXISTING'] = [
+            'id' => 7, 'sku' => 'EXISTING', 'type' => 'simple',
+            'name' => 'Ručno uređen naziv',
+        ];
+        $gateway->resolvedBySku['INACTIVE'] = [
+            'id' => 8, 'sku' => 'INACTIVE', 'type' => 'simple',
+            'name' => 'Postojeći neaktivni proizvod',
+        ];
+        $records = [
+            $this->record('NEW'),
+            $this->record('EXISTING'),
+            $this->record('INACTIVE', false, 0),
+        ];
+        foreach ($records as &$record) {
+            $record['nazivRobe'] = '>GUMA RUBENA';
+        }
+        unset($record);
+        $path = $this->records($records);
+        try {
+            $result = $this->service($gateway)->import($path);
+        } finally {
+            unlink($path);
+        }
+
+        self::assertSame(1, $result['summary']['created']);
+        self::assertSame(2, $result['summary']['updated']);
+        self::assertSame('>GUMA RUBENA', $gateway->createdPayloads['NEW']['name']);
+        self::assertArrayNotHasKey('name', $gateway->updatedPayloads['EXISTING']);
+        self::assertSame('Postojeći neaktivni proizvod #0#', $gateway->updatedPayloads['INACTIVE']['name']);
+        foreach (['EXISTING', 'INACTIVE'] as $sku) {
+            self::assertSame('10.00', $gateway->updatedPayloads[$sku]['regular_price']);
+        }
+        self::assertSame(1, $gateway->updatedPayloads['EXISTING']['stock_quantity']);
+        self::assertSame(0, $gateway->updatedPayloads['INACTIVE']['stock_quantity']);
+    }
+
     public function testResultCallbackRunsImmediatelyForEveryProcessedRecord(): void
     {
         $gateway = new FakeGateway();
@@ -165,14 +204,113 @@ final class ImportServiceTest extends TestCase
         self::assertStringContainsString('Nema mapiranja kategorije', $result['results'][4]->message);
     }
 
-    private function service(FakeGateway $gateway): ImportService
+    public function testInactiveMarkerLifecyclePreservesNameAndCategoriesWithoutRepublishing(): void
+    {
+        $gateway = new FakeGateway();
+        $gateway->categories['brisati'] = 99;
+        $gateway->resolvedBySku['LIFECYCLE'] = ['id' => 7, 'type' => 'simple', 'sku' => 'LIFECYCLE'];
+        $gateway->productDetails[7] = [
+            'id' => 7, 'name' => '>Ručno uređen naziv', 'status' => 'publish',
+            'categories' => [['id' => 12], ['id' => 13]],
+        ];
+        $path = $this->records([$this->record('LIFECYCLE', false, 0, 'XX', '9999')]);
+        try {
+            $service = $this->service($gateway, 'skip_product');
+            $result = $service->import($path);
+            self::assertSame('update', $result['results'][0]->operation);
+            $payload = $gateway->updatedPayloads['LIFECYCLE'];
+            self::assertSame('>Ručno uređen naziv #0#', $payload['name']);
+            self::assertSame('draft', $payload['status']);
+            self::assertSame('hidden', $payload['catalog_visibility']);
+            self::assertSame([['id' => 12], ['id' => 13], ['id' => 99]], $payload['categories']);
+
+            $gateway->productDetails[7] = array_replace($gateway->productDetails[7], $payload);
+            $service->import($path);
+            self::assertArrayNotHasKey('name', $gateway->updatedPayloads['LIFECYCLE']);
+            self::assertCount(3, $gateway->updatedPayloads['LIFECYCLE']['categories']);
+        } finally {
+            unlink($path);
+        }
+
+        $path = $this->records([$this->record('LIFECYCLE', true, 0, 'SC', '9999')]);
+        try {
+            $this->service($gateway)->import($path);
+            $payload = $gateway->updatedPayloads['LIFECYCLE'];
+            self::assertSame('>Ručno uređen naziv', $payload['name']);
+            self::assertSame([['id' => 12], ['id' => 13]], $payload['categories']);
+            self::assertArrayNotHasKey('status', $payload);
+            self::assertArrayNotHasKey('catalog_visibility', $payload);
+        } finally {
+            unlink($path);
+        }
+    }
+
+    public function testMissingRetirementCategoryStillDraftsAndWarns(): void
+    {
+        $gateway = new FakeGateway();
+        $gateway->resolvedBySku['OLD'] = ['id' => 7, 'type' => 'simple'];
+        $path = $this->records([$this->record('OLD', false, 0)]);
+        try {
+            $result = $this->service($gateway)->import($path);
+            self::assertSame('draft', $gateway->updatedPayloads['OLD']['status']);
+            self::assertArrayNotHasKey('categories', $gateway->updatedPayloads['OLD']);
+            self::assertStringContainsString('Brisati', $result['results'][0]->message);
+        } finally {
+            unlink($path);
+        }
+    }
+
+    public function testInvalidExistingNamePreventsUpdateInsteadOfUsingErpName(): void
+    {
+        foreach ([null, '#0#'] as $name) {
+            $gateway = new FakeGateway();
+            $gateway->resolvedBySku['BAD'] = ['id' => 7, 'type' => 'simple'];
+            $gateway->productDetails[7] = ['id' => 7, 'name' => $name];
+            $path = $this->records([$this->record('BAD')]);
+            try {
+                $result = $this->service($gateway)->import($path);
+                self::assertSame('error', $result['results'][0]->operation);
+                self::assertSame([], $gateway->updatedProducts);
+            } finally {
+                unlink($path);
+            }
+        }
+    }
+
+    public function testInactiveVariationIsDraftedWithoutRetiringParent(): void
+    {
+        $gateway = new FakeGateway();
+        $gateway->resolvedBySku['VAR'] = ['id' => 8, 'type' => 'variation', 'parent_id' => 7];
+        $path = $this->records([$this->record('VAR', false, 0)]);
+        try {
+            $this->service($gateway)->import($path);
+            $payload = $gateway->updatedPayloads['VAR'];
+            self::assertSame('draft', $payload['status']);
+            self::assertContains(['key' => 'upp_inactive_marker', 'value' => '#0#'], $payload['meta_data']);
+            self::assertArrayNotHasKey('name', $payload);
+            self::assertArrayNotHasKey('categories', $payload);
+            self::assertArrayNotHasKey('status', $gateway->updatedProducts[0]['payload']);
+        } finally {
+            unlink($path);
+        }
+        $path = $this->records([$this->record('VAR', true, 2)]);
+        try {
+            $this->service($gateway)->import($path);
+            self::assertContains(['key' => 'upp_inactive_marker', 'value' => ''], $gateway->updatedPayloads['VAR']['meta_data']);
+            self::assertArrayNotHasKey('status', $gateway->updatedPayloads['VAR']);
+        } finally {
+            unlink($path);
+        }
+    }
+
+    private function service(FakeGateway $gateway, string $unknownBehavior = 'skip_category'): ImportService
     {
         return new ImportService(
             new JsonFileReader(), new JsonValidator(),
             new ProductRecordNormalizer(new StockCalculator()),
             new ProductPayloadFactory(new AttributeMapper()),
             new CategoryMapper(['1083' => 'scott']), new BrandMapper(['SC' => 'Scott']),
-            $gateway
+            $gateway, null, $unknownBehavior, $unknownBehavior === 'skip_product' ? 'skip_product' : 'continue'
         );
     }
 

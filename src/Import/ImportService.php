@@ -74,14 +74,16 @@ final class ImportService
                 return $this->result($record, 'skip', null, null, 'Neaktivan proizvod bez zalihe ne postoji; kreiranje je preskočeno.');
             }
 
-            $categoryIds = $this->categories($record, $warnings);
+            $retiring = !$record->active && $record->totalStock == 0.0;
+            // Povlačenje postojećeg proizvoda ne smije ovisiti o ERP mapiranjima.
+            $categoryIds = $retiring ? [] : $this->categories($record, $warnings);
             if ($categoryIds === null) {
                 return $this->result($record, 'skipped_with_warning', $existing['id'] ?? null, null, implode(' ', $warnings));
             }
             $brandName = $this->brandMapper->nameFor($record->brandCode);
             if ($record->brandCode !== null && $brandName === null) {
                 $warnings[] = "Nepoznat brand {$record->brandCode}; atribut Proizvođač nije upisan.";
-                if ($this->unknownBrandBehavior === 'skip_product') {
+                if (!$retiring && $this->unknownBrandBehavior === 'skip_product') {
                     return $this->result($record, 'skipped_with_warning', $existing['id'] ?? null, null, implode(' ', $warnings));
                 }
             }
@@ -99,12 +101,57 @@ final class ImportService
                 $response = (new VariationService($this->gateway))->update($record, $existing, $payload);
                 $this->updatedVariationParentIds[(int) $existing['parent_id']] = true;
             } else {
+                $this->applyInactiveMarker($record, $existing, $payload, $warnings);
                 $response = $this->gateway->updateProduct((int) $existing['id'], $payload, $record->sku);
             }
             return $this->result($record, 'update', isset($response['id']) ? (int) $response['id'] : (int) $existing['id'], 200, $this->message('Proizvod je ažuriran.', $warnings));
         } catch (Throwable $exception) {
             $status = $exception instanceof GatewayException ? $exception->httpStatus : null;
             return $this->result($record, 'error', null, $status, ImportLogger::sanitize($exception->getMessage()));
+        }
+    }
+
+    private function applyInactiveMarker(ProductRecord $record, array $existing, array &$payload, array &$warnings): void
+    {
+        $current = $this->gateway->getProduct((int) $existing['id'], $record->sku);
+        if ((int) ($current['id'] ?? 0) !== (int) $existing['id'] || !is_string($current['name'] ?? null) || trim($current['name']) === '') {
+            throw new \RuntimeException('Nije moguće pouzdano pročitati postojeći naziv proizvoda; ažuriranje je zaustavljeno.');
+        }
+        $name = $current['name'];
+        $retiring = !$record->active && $record->totalStock == 0.0;
+        if ($retiring) {
+            if (!str_contains($name, '#0#')) {
+                $payload['name'] = $name . ' #0#';
+            }
+            // Sačuvaj postojeće kategorije i dodaj oznaku za povlačenje.
+            $categoryId = $this->gateway->categoryIdBySlug('brisati');
+            if ($categoryId === null) {
+                $warnings[] = 'Kategorija Brisati (brisati) nije pronađena; proizvod je ipak označen i postavljen u skicu.';
+            } else {
+                if (!is_array($current['categories'] ?? null)) {
+                    throw new \RuntimeException('Nije moguće pročitati postojeće kategorije proizvoda.');
+                }
+                $ids = array_map(static fn (array $category): int => (int) $category['id'], $current['categories']);
+                $ids[] = $categoryId;
+                $payload['categories'] = array_map(static fn (int $id): array => ['id' => $id], array_values(array_unique($ids)));
+            }
+        } elseif ($record->active && str_contains($name, '#0#')) {
+            $cleanName = trim(str_replace([' #0#', '#0#'], '', $name));
+            if ($cleanName === '') {
+                throw new \RuntimeException('Postojeći naziv sadrži samo oznaku #0#; prije importa potrebno je ispraviti naziv u WooCommerceu.');
+            }
+            $payload['name'] = $cleanName;
+            $categoryId = $this->gateway->categoryIdBySlug('brisati');
+            if ($categoryId !== null) {
+                $categories = $payload['categories'] ?? ($current['categories'] ?? null);
+                if (!is_array($categories)) {
+                    throw new \RuntimeException('Nije moguće pročitati postojeće kategorije proizvoda.');
+                }
+                $payload['categories'] = array_values(array_map(
+                    static fn (array $category): array => ['id' => (int) $category['id']],
+                    array_filter($categories, static fn (array $category): bool => (int) $category['id'] !== $categoryId),
+                ));
+            }
         }
     }
 

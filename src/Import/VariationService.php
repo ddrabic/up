@@ -23,7 +23,13 @@ final class VariationService
         // Polja proizvoda i struktura njegovih atributa nisu valjan payload za
         // endpoint varijacije. Ovdje sinkroniziramo cijenu i zalihu, a postojeće
         // atribute varijacije ostavljamo nepromijenjenima.
-        unset($payload['name'], $payload['type'], $payload['status'], $payload['catalog_visibility'], $payload['categories'], $payload['attributes']);
+        unset($payload['name'], $payload['type'], $payload['catalog_visibility'], $payload['categories'], $payload['attributes']);
+        // Varijacije nemaju zaseban naziv koji REST dopušta uređivati.
+        // Oznaku čuvamo na varijaciji, bez mijenjanja naziva ili statusa roditelja.
+        $retiring = !$record->active && $record->totalStock == 0.0;
+        if ($retiring || $record->active) {
+            $payload['meta_data'][] = ['key' => 'upp_inactive_marker', 'value' => $retiring ? '#0#' : ''];
+        }
         return $this->gateway->updateVariation((int) $parentId, (int) $existing['id'], $payload, $record->sku);
     }
 

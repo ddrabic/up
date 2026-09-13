@@ -25,7 +25,8 @@ final class ProductPayloadFactory
     public function update(ProductRecord $record, array $categoryIds, ?string $brandName): array
     {
         $payload = $this->common($record, $categoryIds, $brandName);
-        $payload['name'] = $record->name;
+        // Naziv iz ERP-a preuzima se samo pri kreiranju, kao u početnoj aplikaciji.
+        // ImportService mijenja samo poslovnu oznaku #0# na postojećem nazivu.
         if (!$record->active && $record->totalStock == 0.0) {
             $payload['status'] = 'draft';
             $payload['catalog_visibility'] = 'hidden';

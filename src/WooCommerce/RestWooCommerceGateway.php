@@ -80,6 +80,12 @@ final class RestWooCommerceGateway implements WooCommerceGatewayInterface
         ];
     }
 
+    public function getProduct(int $id, string $sku): array
+    {
+        $endpoint = 'products/' . $id;
+        return $this->objectResponse($this->request('GET', $endpoint, $sku, fn () => $this->client->get($endpoint)));
+    }
+
     public function findProductsBySku(string $sku): array
     {
         $products = $this->request('GET', 'products', $sku, fn () => $this->client->get('products', ['sku' => $sku, 'per_page' => 100]));

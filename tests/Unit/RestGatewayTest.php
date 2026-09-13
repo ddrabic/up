@@ -81,6 +81,14 @@ final class RestGatewayTest extends TestCase
         self::assertNull($missing->resolveProductBySku('MISSING'));
     }
 
+    public function testGetProductReadsCurrentNameAndCategoriesByResolvedId(): void
+    {
+        $product = ['id' => 7, 'name' => 'Uređen naziv #0#', 'categories' => [['id' => 9]]];
+        $client = new StubClient([$product]);
+        self::assertSame($product, (new RestWooCommerceGateway($client))->getProduct(7, 'SKU'));
+        self::assertSame(['GET', 'products/7', []], $client->requests[0]);
+    }
+
     public function testVariationUpdateUsesParentAndVariationEndpoint(): void
     {
         $client = new StubClient([['id' => 102, 'sku' => 'VAR']]);
