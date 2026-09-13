@@ -1,9 +1,7 @@
 <?php
 
 declare(strict_types=1);
-
 require_once __DIR__ . '/../vendor/autoload.php';
-
 use Upp\Config\Config;
 
 function upp_config(?string $key = null, mixed $default = null): mixed
