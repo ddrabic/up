@@ -308,12 +308,56 @@ final class ImportServiceTest extends TestCase
             unlink($path);
         }
 
-        self::assertSame(['stage' => 'ready', 'total' => 2], $progress[0]);
+        self::assertSame(['stage' => 'ready', 'total' => 2, 'offset' => 0, 'chunkTotal' => 2], $progress[0]);
         $batch = array_values(array_filter($progress, static fn (array $event): bool => $event['stage'] === 'updating_batch'));
         self::assertCount(1, $batch);
         self::assertSame(1, $batch[0]['from']);
         self::assertSame(2, $batch[0]['to']);
         self::assertSame(['FIRST', 'SECOND'], $batch[0]['skus']);
+    }
+
+    public function testImportRangeProcessesOnlyRequestedRecordsAndKeepsOriginalIndexes(): void
+    {
+        $gateway = new FakeGateway();
+        $path = $this->records([
+            $this->record('FIRST'),
+            $this->record('SECOND'),
+            $this->record('THIRD'),
+        ]);
+
+        try {
+            $result = $this->service($gateway)->import($path, null, null, null, 1, 1);
+        } finally {
+            unlink($path);
+        }
+
+        self::assertCount(1, $result['results']);
+        self::assertSame('SECOND', $result['results'][0]->sku);
+        self::assertSame(1, $result['results'][0]->index);
+        self::assertSame(3, $result['sourceTotal']);
+        self::assertSame(2, $result['nextOffset']);
+        self::assertTrue($result['hasMore']);
+        self::assertArrayNotHasKey('FIRST', $gateway->createdPayloads);
+        self::assertArrayNotHasKey('THIRD', $gateway->createdPayloads);
+    }
+
+    public function testStartPositionPastEndFinishesWithoutWooCommerceCalls(): void
+    {
+        $gateway = new FakeGateway();
+        $path = $this->records([$this->record('ONLY')]);
+
+        try {
+            $result = $this->service($gateway)->import($path, null, null, null, 999, 100);
+        } finally {
+            unlink($path);
+        }
+
+        self::assertSame(0, $result['summary']['total']);
+        self::assertSame([], $result['results']);
+        self::assertSame(1, $result['sourceTotal']);
+        self::assertSame(999, $result['nextOffset']);
+        self::assertFalse($result['hasMore']);
+        self::assertSame(0, $gateway->calls);
     }
 
     public function testVariationStockPayloadForZeroAndPositiveStock(): void

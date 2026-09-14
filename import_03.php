@@ -2,6 +2,11 @@
 
 declare(strict_types=1);
 
+// Dijagnostika pripada server logu. PHP warning/deprecation ne smije pokvariti
+// NDJSON odgovor tako da preglednik pokuša parsirati HTML kao rezultat importa.
+ini_set('display_errors', '0');
+ini_set('html_errors', '0');
+
 require __DIR__ . '/login_check.php';
 require __DIR__ . '/vendor/autoload.php';
 require __DIR__ . '/lib/web.php';
@@ -30,6 +35,12 @@ $cancellation = null;
 $streaming = false;
 try {
     upp_require_csrf();
+    $offsetValue = (string) ($_POST['offset'] ?? '0');
+    if (preg_match('/^\d+$/', $offsetValue) !== 1) {
+        throw new InvalidArgumentException('Početni zapis importa nije valjan.');
+    }
+    $offset = (int) $offsetValue;
+    $chunkSize = 100;
     if (session_status() === PHP_SESSION_ACTIVE) {
         session_write_close();
     }
@@ -58,8 +69,16 @@ try {
             $logger->progress($progress);
             $emit(['type' => 'progress'] + $progress);
         },
+        $offset,
+        $chunkSize,
     );
-    $emit(['type' => 'complete', 'summary' => $result['summary']]);
+    $emit([
+        'type' => 'complete',
+        'summary' => $result['summary'],
+        'sourceTotal' => $result['sourceTotal'],
+        'nextOffset' => $result['nextOffset'],
+        'hasMore' => $result['hasMore'],
+    ]);
 } catch (ImportCancelledException $exception) {
     $emit(['type' => 'cancelled', 'processed' => $exception->processed, 'message' => $exception->getMessage()]);
 } catch (Throwable $exception) {

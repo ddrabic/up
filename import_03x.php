@@ -20,6 +20,10 @@ $csrf = upp_csrf_token();
 </nav>
 <main class="w3-container">
     <h1>Import proizvoda</h1>
+    <p>
+        <label for="start-record">Počni od zapisa:</label>
+        <input id="start-record" class="w3-input w3-border" type="number" min="1" step="1" value="1" style="max-width: 12rem">
+    </p>
     <button id="start" class="w3-button w3-border w3-border-red w3-round">Pokreni import</button>
     <button id="stop" class="w3-button w3-red w3-round" disabled>Zaustavi import</button>
     <p id="progress" aria-live="polite"></p>
@@ -27,6 +31,7 @@ $csrf = upp_csrf_token();
 </main>
 <script>
 const button = document.getElementById('start');
+const startRecordInput = document.getElementById('start-record');
 const stopButton = document.getElementById('stop');
 const progress = document.getElementById('progress');
 const results = document.getElementById('results');
@@ -94,7 +99,14 @@ window.addEventListener('pagehide', () => {
 });
 
 button.addEventListener('click', async () => {
+    const startRecord = Number(startRecordInput.value);
+    if (!Number.isInteger(startRecord) || startRecord < 1) {
+        progress.textContent = 'Početni zapis mora biti cijeli broj veći ili jednak 1.';
+        startRecordInput.focus();
+        return;
+    }
     button.disabled = true;
+    startRecordInput.disabled = true;
     results.replaceChildren();
     totalRecords = null;
     lastConfirmedRecord = 0;
@@ -108,83 +120,108 @@ button.addEventListener('click', async () => {
     };
     renderProgress();
     const timer = window.setInterval(renderProgress, 1000);
-    const body = new FormData();
-    body.append('csrf_token', csrfToken);
+    let nextOffset = startRecord - 1;
+    const totals = {created: 0, updated: 0, skipped: 0, warnings: 0, errors: 0};
     try {
-        const response = await fetch('import_03.php', {method: 'POST', body});
-        const contentType = response.headers.get('content-type') || '';
-        if (!contentType.includes('application/x-ndjson')) {
-            throw endpointError(response, 'import_03.php');
-        }
-        if (!response.body) throw new Error('Poslužitelj nije vratio tijelo odgovora.');
-        const reader = response.body.getReader();
-        const decoder = new TextDecoder();
-        let buffer = '';
-        let finished = false;
-        let streamError = null;
+        let importFinished = false;
+        while (!importFinished) {
+            const body = new FormData();
+            body.append('csrf_token', csrfToken);
+            body.append('offset', String(nextOffset));
+            const response = await fetch('import_03.php', {method: 'POST', body});
+            const contentType = response.headers.get('content-type') || '';
+            if (!contentType.includes('application/x-ndjson')) {
+                throw endpointError(response, 'import_03.php');
+            }
+            if (!response.body) throw new Error('Poslužitelj nije vratio tijelo odgovora.');
+            const reader = response.body.getReader();
+            const decoder = new TextDecoder();
+            let buffer = '';
+            let chunkFinished = false;
+            let chunkHasMore = false;
+            let returnedNextOffset = nextOffset;
+            let streamError = null;
 
-        const handleEvent = (event) => {
-            if (event.type === 'start') {
-                activeImportId = event.importId;
-                stopButton.disabled = false;
-                statusText = 'Veza je uspostavljena; priprema se prvi paket SKU-ova i WooCommerce kategorije';
-            } else if (event.type === 'progress') {
-                totalRecords = event.total ?? totalRecords;
-                if (event.stage === 'ready') {
-                    statusText = `JSON je spreman za import. Ukupno zapisa: ${totalRecords}`;
-                } else if (event.stage === 'resolving') {
-                    currentImportContext = `razrješavanje zapisa #${event.from}–#${event.to}`;
-                    statusText = `Priprema zapisa ${event.from}–${event.to} od ${totalRecords}`;
-                } else if (event.stage === 'record') {
-                    currentImportContext = `zapis #${event.record}, SKU ${event.sku}`;
-                    statusText = `Priprema zapisa ${event.record}/${totalRecords}, SKU: ${event.sku}`;
-                } else if (event.stage === 'updating_batch') {
-                    currentImportContext = `batch zapisa #${event.from}–#${event.to}; SKU-ovi: ${(event.skus || []).join(', ')}`;
-                    statusText = `WooCommerce ažurira zapise ${event.from}–${event.to} od ${totalRecords}`;
-                } else if (event.stage === 'updating_one') {
-                    currentImportContext = `zapis #${event.record}, SKU ${event.sku}`;
-                    statusText = `WooCommerce ažurira zapis ${event.record}/${totalRecords}, SKU: ${event.sku}`;
+            const handleEvent = (event) => {
+                if (event.type === 'start') {
+                    activeImportId = event.importId;
+                    stopButton.disabled = false;
+                    statusText = 'Veza je uspostavljena; priprema se paket SKU-ova i WooCommerce kategorije';
+                } else if (event.type === 'progress') {
+                    totalRecords = event.total ?? totalRecords;
+                    if (event.stage === 'ready') {
+                        statusText = `JSON je spreman. Obrađuje se paket od ${event.chunkTotal} zapisa.`;
+                    } else if (event.stage === 'resolving') {
+                        currentImportContext = `razrješavanje zapisa #${event.from}–#${event.to}`;
+                        statusText = `Priprema zapisa ${event.from}–${event.to} od ${totalRecords}`;
+                    } else if (event.stage === 'record') {
+                        currentImportContext = `zapis #${event.record}, SKU ${event.sku}`;
+                        statusText = `Priprema zapisa ${event.record}/${totalRecords}, SKU: ${event.sku}`;
+                    } else if (event.stage === 'updating_batch') {
+                        currentImportContext = `batch zapisa #${event.from}–#${event.to}; SKU-ovi: ${(event.skus || []).join(', ')}`;
+                        statusText = `WooCommerce ažurira zapise ${event.from}–${event.to} od ${totalRecords}`;
+                    } else if (event.stage === 'updating_one') {
+                        currentImportContext = `zapis #${event.record}, SKU ${event.sku}`;
+                        statusText = `WooCommerce ažurira zapis ${event.record}/${totalRecords}, SKU: ${event.sku}`;
+                    }
+                } else if (event.type === 'result') {
+                    processed++;
+                    const recordNumber = Number(event.index) + 1;
+                    lastConfirmedRecord = recordNumber;
+                    const row = document.createElement('tr');
+                    for (const value of [recordNumber, event.operation, event.sku, event.message]) {
+                        const cell = document.createElement('td'); cell.textContent = value ?? ''; row.appendChild(cell);
+                    }
+                    results.appendChild(row);
+                    statusText = `Obrađeno proizvoda: ${processed}/${totalRecords ?? '?'}. Zadnji zapis: #${recordNumber}, SKU: ${event.sku}`;
+                    renderProgress();
+                } else if (event.type === 'complete') {
+                    chunkFinished = true;
+                    activeImportId = null;
+                    stopButton.disabled = true;
+                    totalRecords = event.sourceTotal ?? totalRecords;
+                    returnedNextOffset = Number(event.nextOffset);
+                    chunkHasMore = event.hasMore === true;
+                    for (const key of Object.keys(totals)) {
+                        totals[key] += Number(event.summary?.[key] || 0);
+                    }
+                } else if (event.type === 'cancelled') {
+                    chunkFinished = true;
+                    importFinished = true;
+                    activeImportId = null;
+                    stopButton.disabled = true;
+                    statusText = `Import je zaustavljen. Obrađeno proizvoda: ${processed}/${totalRecords ?? '?'}.`;
+                } else if (event.type === 'error') {
+                    streamError = event.message || 'Import nije uspio.';
                 }
-            } else if (event.type === 'result') {
-                processed++;
-                const recordNumber = Number(event.index) + 1;
-                lastConfirmedRecord = recordNumber;
-            const row = document.createElement('tr');
-                for (const value of [recordNumber, event.operation, event.sku, event.message]) {
-                const cell = document.createElement('td'); cell.textContent = value ?? ''; row.appendChild(cell);
-            }
-            results.appendChild(row);
-                statusText = `Obrađeno proizvoda: ${processed}/${totalRecords ?? '?'}. Zadnji zapis: #${recordNumber}, SKU: ${event.sku}`;
-                renderProgress();
-            } else if (event.type === 'complete') {
-                finished = true;
-                activeImportId = null;
-                stopButton.disabled = true;
-                const summary = event.summary;
-                statusText = `Završeno: ${summary.created} kreirano, ${summary.updated} ažurirano, ${summary.errors} grešaka.`;
-            } else if (event.type === 'cancelled') {
-                finished = true;
-                activeImportId = null;
-                stopButton.disabled = true;
-                statusText = `Import je zaustavljen. Obrađeno proizvoda: ${event.processed}/${totalRecords ?? '?'}.`;
-            } else if (event.type === 'error') {
-                streamError = event.message || 'Import nije uspio.';
-            }
-        };
+            };
 
-        while (true) {
-            const {value, done} = await reader.read();
-            buffer += decoder.decode(value || new Uint8Array(), {stream: !done});
-            const lines = buffer.split('\n');
-            buffer = lines.pop() || '';
-            for (const line of lines) {
-                if (line.trim()) handleEvent(parseEvent(line));
+            while (true) {
+                const {value, done} = await reader.read();
+                buffer += decoder.decode(value || new Uint8Array(), {stream: !done});
+                const lines = buffer.split('\n');
+                buffer = lines.pop() || '';
+                for (const line of lines) {
+                    if (line.trim()) handleEvent(parseEvent(line));
+                }
+                if (done) break;
             }
-            if (done) break;
+            if (buffer.trim()) handleEvent(parseEvent(buffer));
+            if (streamError) throw new Error(streamError);
+            if (!response.ok || !chunkFinished) throw new Error('Import je prekinut prije završnog rezultata.');
+            if (importFinished) break;
+            if (!chunkHasMore) {
+                importFinished = true;
+                statusText = `Završeno: ${totals.created} kreirano, ${totals.updated} ažurirano, ${totals.errors} grešaka.`;
+                break;
+            }
+            if (!Number.isInteger(returnedNextOffset) || returnedNextOffset <= nextOffset) {
+                throw new Error('Poslužitelj nije vratio valjan nastavak importa.');
+            }
+            nextOffset = returnedNextOffset;
+            statusText = `Paket je dovršen. Nastavlja se od zapisa #${nextOffset + 1}.`;
+            renderProgress();
         }
-        if (buffer.trim()) handleEvent(parseEvent(buffer));
-        if (streamError) throw new Error(streamError);
-        if (!response.ok || !finished) throw new Error('Import je prekinut prije završnog rezultata.');
         progress.textContent = statusText;
     } catch (error) {
         if (activeImportId) {
@@ -199,6 +236,7 @@ button.addEventListener('click', async () => {
         activeImportId = null;
         stopButton.disabled = true;
         button.disabled = false;
+        startRecordInput.disabled = false;
     }
 });
 </script>

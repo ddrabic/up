@@ -31,12 +31,22 @@ final class ImportService
     ) {
     }
 
-    /** @return array{summary: array<string, mixed>, results: list<ImportResult>} */
+    /**
+     * @return array{
+     *   summary: array<string, mixed>,
+     *   results: list<ImportResult>,
+     *   sourceTotal: int,
+     *   nextOffset: int,
+     *   hasMore: bool
+     * }
+     */
     public function import(
         string $path,
         ?callable $onResult = null,
         ?callable $shouldCancel = null,
         ?callable $onProgress = null,
+        int $offset = 0,
+        ?int $limit = null,
     ): array
     {
         $startedAt = gmdate(DATE_ATOM);
@@ -46,9 +56,39 @@ final class ImportService
         foreach ($raw as $index => $item) {
             $records[] = $this->normalizer->normalize($item, $index);
         }
-        $this->progress($onProgress, ['stage' => 'ready', 'total' => count($records)]);
+        $sourceTotal = count($records);
+        if ($offset < 0) {
+            throw new \InvalidArgumentException('Početni zapis importa nije valjan.');
+        }
+        if ($limit !== null && $limit < 1) {
+            throw new \InvalidArgumentException('Veličina paketa importa mora biti veća od nule.');
+        }
+        if ($offset > 0 || $limit !== null) {
+            $records = array_slice($records, $offset, $limit);
+        }
+        $this->progress($onProgress, [
+            'stage' => 'ready',
+            'total' => $sourceTotal,
+            'offset' => $offset,
+            'chunkTotal' => count($records),
+        ]);
 
         $this->updatedVariationParentIds = [];
+
+        // Početna pozicija namjerno nema gornju granicu. Ako je iza kraja
+        // datoteke, import uredno završava bez povezivanja na WooCommerce.
+        if ($records === []) {
+            $finishedAt = gmdate(DATE_ATOM);
+            $summary = $this->summarize([], 0, $startedAt, $finishedAt);
+            $this->logger?->summary($summary);
+            return [
+                'summary' => $summary,
+                'results' => [],
+                'sourceTotal' => $sourceTotal,
+                'nextOffset' => $offset,
+                'hasMore' => false,
+            ];
+        }
 
         // Nijedan gateway poziv ne smije se dogoditi prije potpune validacije/normalizacije.
         $this->gateway->checkConnection();
@@ -59,7 +99,7 @@ final class ImportService
                 'stage' => 'resolving',
                 'from' => $batch[0]->index + 1,
                 'to' => $batch[array_key_last($batch)]->index + 1,
-                'total' => count($records),
+                'total' => $sourceTotal,
             ]);
             try {
                 $existingBySku = $this->gateway->resolveProductsBySku(array_map(
@@ -78,7 +118,7 @@ final class ImportService
                 $this->throwIfCancelled($shouldCancel, count($results));
                 $this->progress($onProgress, [
                     'stage' => 'record', 'record' => $record->index + 1,
-                    'sku' => $record->sku, 'total' => count($records),
+                    'sku' => $record->sku, 'total' => $sourceTotal,
                 ]);
                 $prepared = $this->prepare($record, $existingBySku[$record->sku] ?? null, $batchResolved);
                 if ($prepared instanceof PendingProductUpdate) {
@@ -87,7 +127,7 @@ final class ImportService
                         continue;
                     }
                 } else {
-                    foreach ($this->flushUpdates($pendingUpdates, $onProgress, count($records)) as $result) {
+                    foreach ($this->flushUpdates($pendingUpdates, $onProgress, $sourceTotal) as $result) {
                         $this->recordResult($result, $results, $onResult);
                     }
                     $pendingUpdates = [];
@@ -95,13 +135,13 @@ final class ImportService
                     continue;
                 }
 
-                foreach ($this->flushUpdates($pendingUpdates, $onProgress, count($records)) as $result) {
+                foreach ($this->flushUpdates($pendingUpdates, $onProgress, $sourceTotal) as $result) {
                     $this->recordResult($result, $results, $onResult);
                 }
                 $pendingUpdates = [];
             }
             $this->throwIfCancelled($shouldCancel, count($results));
-            foreach ($this->flushUpdates($pendingUpdates, $onProgress, count($records)) as $result) {
+            foreach ($this->flushUpdates($pendingUpdates, $onProgress, $sourceTotal) as $result) {
                 $this->recordResult($result, $results, $onResult);
             }
         }
@@ -109,7 +149,14 @@ final class ImportService
 
         $summary = $this->summarize($results, count($records), $startedAt, gmdate(DATE_ATOM));
         $this->logger?->summary($summary);
-        return ['summary' => $summary, 'results' => $results];
+        $nextOffset = $offset + count($records);
+        return [
+            'summary' => $summary,
+            'results' => $results,
+            'sourceTotal' => $sourceTotal,
+            'nextOffset' => $nextOffset,
+            'hasMore' => $nextOffset < $sourceTotal,
+        ];
     }
 
     private function throwIfCancelled(?callable $shouldCancel, int $processed): void
