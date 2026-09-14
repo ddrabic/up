@@ -6,6 +6,7 @@ namespace Upp\Tests\Unit;
 
 use PHPUnit\Framework\TestCase;
 use Upp\Import\ImportService;
+use Upp\Import\ImportCancelledException;
 use Upp\Import\JsonFileReader;
 use Upp\Import\JsonValidator;
 use Upp\Import\ProductPayloadFactory;
@@ -121,6 +122,24 @@ final class ImportServiceTest extends TestCase
         self::assertCount(2, $result['results']);
     }
 
+    public function testDecimalStockIsSafelyFlooredAndReportedToTheUser(): void
+    {
+        $gateway = new FakeGateway();
+        $path = $this->records([$this->record('DECIMAL', true, 4.529999999999999)]);
+
+        try {
+            $result = $this->service($gateway)->import($path);
+        } finally {
+            unlink($path);
+        }
+
+        self::assertSame(4, $gateway->createdPayloads['DECIMAL']['stock_quantity']);
+        self::assertStringContainsString(
+            'Decimalna ERP zaliha 4,53 prilagođena je na 4',
+            $result['results'][0]->message,
+        );
+    }
+
     public function testVariationIsFoundBySkuWithoutParentIdAndUpdated(): void
     {
         $gateway = new FakeGateway();
@@ -161,6 +180,140 @@ final class ImportServiceTest extends TestCase
         self::assertSame('update', $result['results'][0]->operation);
         self::assertSame(100, $gateway->updatedProducts[0]['id']);
         self::assertSame('SIMPLE', $gateway->updatedProducts[0]['sku']);
+    }
+
+    public function testResolverDetailsAvoidRedundantProductReadWithCompatibleFallback(): void
+    {
+        $gateway = new FakeGateway();
+        $gateway->resolvedBySku['OPTIMIZED'] = [
+            'id' => 100, 'sku' => 'OPTIMIZED', 'type' => 'simple', 'parent_id' => null,
+            'name' => 'Postojeći naziv', 'categories' => [['id' => 8]],
+        ];
+        $gateway->resolvedBySku['LEGACY'] = [
+            'id' => 101, 'sku' => 'LEGACY', 'type' => 'simple', 'parent_id' => null,
+        ];
+        $path = $this->records([$this->record('OPTIMIZED'), $this->record('LEGACY')]);
+
+        try {
+            $result = $this->service($gateway)->import($path);
+        } finally {
+            unlink($path);
+        }
+
+        self::assertSame(2, $result['summary']['updated']);
+        self::assertSame(1, $gateway->getProductCalls);
+    }
+
+    public function testExistingSimpleProductsAreUpdatedInSmallBatches(): void
+    {
+        $gateway = new FakeGateway();
+        $records = [];
+        for ($index = 1; $index <= 11; $index++) {
+            $sku = 'BATCH-' . $index;
+            $gateway->resolvedBySku[$sku] = [
+                'id' => 100 + $index, 'sku' => $sku, 'type' => 'simple', 'parent_id' => null,
+                'name' => 'Postojeći naziv ' . $index, 'categories' => [],
+            ];
+            $records[] = $this->record($sku);
+        }
+        $path = $this->records($records);
+
+        try {
+            $result = $this->service($gateway)->import($path);
+        } finally {
+            unlink($path);
+        }
+
+        self::assertSame(11, $result['summary']['updated']);
+        self::assertSame(2, $gateway->batchUpdateCalls);
+        self::assertSame('BATCH-1', $result['results'][0]->sku);
+        self::assertSame('BATCH-11', $result['results'][10]->sku);
+    }
+
+    public function testFailedBatchUpdateFallsBackToPerProductUpdates(): void
+    {
+        $gateway = new FakeGateway();
+        $gateway->batchUpdateError = new \RuntimeException('Batch nije dostupan.');
+        foreach (['A', 'B'] as $index => $sku) {
+            $gateway->resolvedBySku[$sku] = [
+                'id' => 10 + $index, 'sku' => $sku, 'type' => 'simple', 'parent_id' => null,
+                'name' => 'Postojeći naziv', 'categories' => [],
+            ];
+        }
+        $path = $this->records([$this->record('A'), $this->record('B')]);
+
+        try {
+            $result = $this->service($gateway)->import($path);
+        } finally {
+            unlink($path);
+        }
+
+        self::assertSame(2, $result['summary']['updated']);
+        self::assertSame(1, $gateway->batchUpdateCalls);
+        self::assertCount(2, $gateway->updatedProducts);
+    }
+
+    public function testCancellationStopsAfterTheCurrentlyRunningBatch(): void
+    {
+        $gateway = new FakeGateway();
+        $records = [];
+        for ($index = 1; $index <= 15; $index++) {
+            $sku = 'STOP-' . $index;
+            $gateway->resolvedBySku[$sku] = [
+                'id' => 200 + $index, 'sku' => $sku, 'type' => 'simple', 'parent_id' => null,
+                'name' => 'Postojeći naziv ' . $index, 'categories' => [],
+            ];
+            $records[] = $this->record($sku);
+        }
+        $path = $this->records($records);
+
+        try {
+            $this->service($gateway)->import(
+                $path,
+                null,
+                static fn (): bool => $gateway->batchUpdateCalls >= 1,
+            );
+            self::fail('Import nije zaustavljen.');
+        } catch (ImportCancelledException $exception) {
+            self::assertSame(10, $exception->processed);
+            self::assertSame(1, $gateway->batchUpdateCalls);
+            self::assertCount(10, $gateway->updatedProducts);
+        } finally {
+            unlink($path);
+        }
+    }
+
+    public function testProgressReportsTotalRecordNumbersAndBatchSkus(): void
+    {
+        $gateway = new FakeGateway();
+        foreach (['FIRST', 'SECOND'] as $index => $sku) {
+            $gateway->resolvedBySku[$sku] = [
+                'id' => 300 + $index, 'sku' => $sku, 'type' => 'simple', 'parent_id' => null,
+                'name' => 'Postojeći naziv', 'categories' => [],
+            ];
+        }
+        $path = $this->records([$this->record('FIRST'), $this->record('SECOND')]);
+        $progress = [];
+
+        try {
+            $this->service($gateway)->import(
+                $path,
+                null,
+                null,
+                static function (array $event) use (&$progress): void {
+                    $progress[] = $event;
+                },
+            );
+        } finally {
+            unlink($path);
+        }
+
+        self::assertSame(['stage' => 'ready', 'total' => 2], $progress[0]);
+        $batch = array_values(array_filter($progress, static fn (array $event): bool => $event['stage'] === 'updating_batch'));
+        self::assertCount(1, $batch);
+        self::assertSame(1, $batch[0]['from']);
+        self::assertSame(2, $batch[0]['to']);
+        self::assertSame(['FIRST', 'SECOND'], $batch[0]['skus']);
     }
 
     public function testVariationStockPayloadForZeroAndPositiveStock(): void

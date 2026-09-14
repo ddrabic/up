@@ -54,6 +54,25 @@ final class PayloadFactoryTest extends TestCase
         self::assertSame(['202' => 4, '204' => 0], $payload['meta_data'][0]['value']);
     }
 
+    public function testDecimalErpStockIsFlooredOnlyForWooCommerceQuantity(): void
+    {
+        $factory = new ProductPayloadFactory(
+            new AttributeMapper(),
+            'draft',
+            ['202' => ['name' => 'Čakovec'], '208' => ['name' => 'Koprivnica']],
+        );
+        $record = $this->record(4.6, true, 0, ['202' => 2, '208' => 2.6]);
+
+        $payload = $factory->update($record, [], null);
+
+        self::assertSame(4, $payload['stock_quantity']);
+        self::assertSame(['202' => 2, '208' => 2.6], $payload['meta_data'][0]['value']);
+
+        $belowOne = $factory->update($this->record(0.6, true, 0, ['208' => 0.6]), [], null);
+        self::assertSame(0, $belowOne['stock_quantity']);
+        self::assertSame('outofstock', $belowOne['stock_status']);
+    }
+
     private function record(float $stock, bool $active, float $discount, array $stockByWarehouse = []): ProductRecord
     {
         return new ProductRecord(0, 'SKU', 'Naziv', 819, $discount, $active, $stock, $stockByWarehouse, '1083', null, 'SC', 'M', '29', 'muški');

@@ -9,6 +9,8 @@ use Upp\WooCommerce\WooCommerceGatewayInterface;
 final class FakeGateway implements WooCommerceGatewayInterface
 {
     public int $calls = 0;
+    public int $getProductCalls = 0;
+    public int $batchUpdateCalls = 0;
     public array $productsBySku = [];
     public array $productDetails = [];
     public array $resolvedBySku = [];
@@ -18,6 +20,7 @@ final class FakeGateway implements WooCommerceGatewayInterface
     public array $createdPayloads = [];
     public array $updatedPayloads = [];
     public array $updatedProducts = [];
+    public ?\Throwable $batchUpdateError = null;
     public ?\Throwable $connectionError = null;
 
     public function checkConnection(): void
@@ -32,9 +35,20 @@ final class FakeGateway implements WooCommerceGatewayInterface
         return $this->resolvedBySku[$sku] ?? null;
     }
 
+    public function resolveProductsBySku(array $skus): array
+    {
+        $this->calls++;
+        $resolved = [];
+        foreach ($skus as $sku) {
+            $resolved[$sku] = $this->resolvedBySku[$sku] ?? null;
+        }
+        return $resolved;
+    }
+
     public function getProduct(int $id, string $sku): array
     {
         $this->calls++;
+        $this->getProductCalls++;
         return $this->productDetails[$id] ?? ($this->resolvedBySku[$sku] + ['name' => 'Postojeći naziv', 'categories' => []]);
     }
 
@@ -81,6 +95,22 @@ final class FakeGateway implements WooCommerceGatewayInterface
         $this->updatedPayloads[$sku] = $payload;
         $this->updatedProducts[] = ['id' => $id, 'sku' => $sku, 'payload' => $payload];
         return ['id' => $id, 'sku' => $sku];
+    }
+
+    public function updateProductsBatch(array $updates): array
+    {
+        $this->calls++;
+        $this->batchUpdateCalls++;
+        if ($this->batchUpdateError !== null) {
+            throw $this->batchUpdateError;
+        }
+        $results = [];
+        foreach ($updates as $update) {
+            $this->updatedPayloads[$update['sku']] = $update['payload'];
+            $this->updatedProducts[] = $update;
+            $results[] = ['success' => true, 'id' => $update['id']];
+        }
+        return $results;
     }
 
     public function updateVariation(int $parentId, int $variationId, array $payload, string $sku): array

@@ -8,8 +8,11 @@ interface WooCommerceGatewayInterface
 {
     public function checkConnection(): void;
 
-    /** @return array{id: int, sku: string, type: string, parent_id: int|null}|null */
+    /** @return array{id: int, sku: string, type: string, parent_id: int|null, name?: string, categories?: list<array{id: int}>}|null */
     public function resolveProductBySku(string $sku): ?array;
+
+    /** @param list<string> $skus @return array<string, array<string, mixed>|null> */
+    public function resolveProductsBySku(array $skus): array;
 
     /** @return array<string, mixed> */
     public function getProduct(int $id, string $sku): array;
@@ -33,6 +36,12 @@ interface WooCommerceGatewayInterface
 
     /** @return array<string, mixed> */
     public function updateProduct(int $id, array $payload, string $sku): array;
+
+    /**
+     * @param list<array{id: int, sku: string, payload: array<string, mixed>}> $updates
+     * @return list<array{success: bool, id?: int, httpStatus?: int|null, wooCode?: string|null, message?: string}>
+     */
+    public function updateProductsBatch(array $updates): array;
 
     /** @return array<string, mixed> */
     public function updateVariation(int $parentId, int $variationId, array $payload, string $sku): array;

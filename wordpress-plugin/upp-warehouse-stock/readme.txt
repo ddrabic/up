@@ -3,7 +3,7 @@ Contributors: upp
 Requires at least: 6.4
 Requires PHP: 7.4
 WC requires at least: 8.0
-Stable tag: 1.1.0
+Stable tag: 1.2.0
 License: GPLv2 or later
 
 Sprema ERP snapshot zalihe po poslovnicama uz opcionalni prikaz dostupnih lokacija na stranici proizvoda.
@@ -22,6 +22,10 @@ Ukupnom WooCommerce zalihom i dalje upravlja UPP importer kao zbrojem ovih sklad
 Javni prikaz je zadano isključen. Ta postavka ne utječe na REST rutu ni spremanje podataka tijekom importa.
 
 == Changelog ==
+
+= 1.2.0 =
+* Dodano skupno razrješavanje do 100 SKU-ova po REST zahtjevu.
+* Resolver vraća naziv i kategorije kako bi importer izbjegao redundantno REST dohvaćanje prije ažuriranja.
 
 = 1.1.0 =
 * Dodana postavka za uključivanje i isključivanje javnog prikaza zaliha.

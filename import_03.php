@@ -7,6 +7,8 @@ require __DIR__ . '/vendor/autoload.php';
 require __DIR__ . '/lib/web.php';
 
 use Upp\Config\Config;
+use Upp\Import\ImportCancellation;
+use Upp\Import\ImportCancelledException;
 use Upp\Import\ImportResult;
 use Upp\Import\ImportServiceFactory;
 use Upp\Logging\ImportLogger;
@@ -24,6 +26,7 @@ $emit = static function (array $event): void {
 };
 
 $lockHandle = null;
+$cancellation = null;
 $streaming = false;
 try {
     upp_require_csrf();
@@ -42,14 +45,23 @@ try {
     header('X-Accel-Buffering: no');
     $streaming = true;
     $importId = gmdate('Ymd-His') . '-' . bin2hex(random_bytes(3));
+    $cancellation = new ImportCancellation(__DIR__ . '/uploads/datoteka.json', $importId);
+    $cancellation->clear();
     $emit(['type' => 'start', 'importId' => $importId]);
     $logger = new ImportLogger(__DIR__ . '/logs', $importId);
     $service = ImportServiceFactory::create(Config::load(__DIR__), $logger);
     $result = $service->import(
         __DIR__ . '/uploads/datoteka.json',
         static fn (ImportResult $result) => $emit(['type' => 'result'] + $result->jsonSerialize()),
+        static fn (): bool => $cancellation->isRequested(),
+        static function (array $progress) use ($emit, $logger): void {
+            $logger->progress($progress);
+            $emit(['type' => 'progress'] + $progress);
+        },
     );
     $emit(['type' => 'complete', 'summary' => $result['summary']]);
+} catch (ImportCancelledException $exception) {
+    $emit(['type' => 'cancelled', 'processed' => $exception->processed, 'message' => $exception->getMessage()]);
 } catch (Throwable $exception) {
     if (!$streaming) {
         http_response_code(422);
@@ -57,6 +69,7 @@ try {
     }
     $emit(['type' => 'error', 'message' => ImportLogger::sanitize($exception->getMessage())]);
 } finally {
+    $cancellation?->clear();
     if (is_resource($lockHandle)) {
         flock($lockHandle, LOCK_UN);
         fclose($lockHandle);

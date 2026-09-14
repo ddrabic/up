@@ -37,6 +37,11 @@ final class ImportLogger
         ]);
     }
 
+    public function progress(array $progress): void
+    {
+        $this->write(['time' => gmdate(DATE_ATOM), 'event' => 'progress'] + $progress);
+    }
+
     public function summary(array $summary): string
     {
         $path = $this->directory . '/import-' . $this->importId . '-summary.json';
@@ -47,7 +52,11 @@ final class ImportLogger
     public static function sanitize(string $message): string
     {
         $patterns = [
-            '/ck_[A-Za-z0-9_]+/' => 'ck_REDACTED', '/cs_[A-Za-z0-9_]+/' => 'cs_REDACTED',
+            // WooCommerce kljucevi su samostalni dugi tokeni. Granica s lijeve
+            // strane je bitna: bez nje "stock_quantity" sadrzi "ck_quantity"
+            // i korisniku se pogresno prikazuje kao "stock_REDACTED".
+            '/(?<![A-Za-z0-9_])ck_[A-Za-z0-9]{20,}/' => 'ck_REDACTED',
+            '/(?<![A-Za-z0-9_])cs_[A-Za-z0-9]{20,}/' => 'cs_REDACTED',
             '/(consumer_(?:key|secret)=)[^&\s]+/i' => '$1REDACTED',
             '/(Authorization:\s*(?:Bearer|Basic)\s+)[^\s]+/i' => '$1REDACTED',
         ];

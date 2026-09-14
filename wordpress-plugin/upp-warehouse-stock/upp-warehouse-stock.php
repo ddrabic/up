@@ -2,7 +2,7 @@
 /**
  * Plugin Name: UPP Warehouse Stock
  * Description: Sprema ERP stanje artikla po poslovnicama/skladištima uz opcionalni prikaz kupcima.
- * Version: 1.1.0
+ * Version: 1.2.0
  * Author: UPP
  * Requires at least: 6.4
  * Requires PHP: 7.4
@@ -14,7 +14,7 @@ defined('ABSPATH') || exit;
 
 final class UPP_Warehouse_Stock
 {
-    private const VERSION = '1.1.0';
+    private const VERSION = '1.2.0';
     private const META_KEY = 'upp_warehouse_stock';
     private const VISIBILITY_OPTION = 'upp_warehouse_stock_visible';
 
@@ -131,25 +131,63 @@ final class UPP_Warehouse_Stock
                 ],
             ],
         ]);
+        register_rest_route('wc/v3', '/upp/products-by-sku', [
+            'methods' => WP_REST_Server::CREATABLE,
+            'callback' => [self::class, 'resolve_products_by_sku'],
+            'permission_callback' => static fn (): bool => current_user_can('manage_woocommerce'),
+            'args' => [
+                'skus' => [
+                    'required' => true,
+                    'type' => 'array',
+                    'items' => ['type' => 'string'],
+                    'minItems' => 1,
+                    'maxItems' => 100,
+                ],
+            ],
+        ]);
     }
 
     public static function resolve_product_by_sku(WP_REST_Request $request): WP_REST_Response
     {
         $sku = trim((string) $request->get_param('sku'));
+        return new WP_REST_Response(self::product_data_by_sku($sku), 200);
+    }
+
+    public static function resolve_products_by_sku(WP_REST_Request $request): WP_REST_Response
+    {
+        $results = [];
+        foreach ((array) $request->get_param('skus') as $requestedSku) {
+            $requestedSku = trim((string) $requestedSku);
+            $results[] = ['requested_sku' => $requestedSku] + self::product_data_by_sku($requestedSku);
+        }
+        return new WP_REST_Response($results, 200);
+    }
+
+    private static function product_data_by_sku(string $sku): array
+    {
         $id = $sku === '' ? 0 : (int) wc_get_product_id_by_sku($sku);
         $product = $id > 0 ? wc_get_product($id) : false;
         if (!$product instanceof WC_Product) {
-            return new WP_REST_Response(['found' => false], 200);
+            return ['found' => false];
         }
 
         $parentId = (int) $product->get_parent_id();
-        return new WP_REST_Response([
+        $categoryIds = array_map('intval', $product->get_category_ids());
+        return [
             'found' => true,
             'id' => $product->get_id(),
             'sku' => $product->get_sku(),
             'type' => $product->get_type(),
             'parent_id' => $parentId > 0 ? $parentId : null,
-        ], 200);
+            // Importer ove podatke treba za sigurnu obradu oznake #0#.
+            // Njihovim vracanjem iz resolvera uklanja se dodatni REST GET za
+            // svaki postojeci jednostavni proizvod.
+            'name' => $product->get_name(),
+            'categories' => array_map(
+                static fn (int $categoryId): array => ['id' => $categoryId],
+                $categoryIds
+            ),
+        ];
     }
 
     public static function replace_imported_stock($product, WP_REST_Request $request, bool $creating)

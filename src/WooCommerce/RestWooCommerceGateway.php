@@ -13,6 +13,7 @@ final class RestWooCommerceGateway implements WooCommerceGatewayInterface
 {
     private array $categoryIdBySlug = [];
     private bool $categoriesLoaded = false;
+    private ?bool $batchResolverAvailable = null;
 
     public function __construct(
         private readonly Client $client,
@@ -61,6 +62,52 @@ final class RestWooCommerceGateway implements WooCommerceGatewayInterface
     {
         $endpoint = 'upp/product-by-sku';
         $resolved = $this->request('GET', $endpoint, $sku, fn () => $this->client->get($endpoint, ['sku' => $sku]));
+        return $this->resolvedProduct($resolved, $sku);
+    }
+
+    public function resolveProductsBySku(array $skus): array
+    {
+        $skus = array_values(array_unique(array_map('strval', $skus)));
+        if ($skus === []) {
+            return [];
+        }
+        if ($this->batchResolverAvailable === false) {
+            return $this->resolveProductsIndividually($skus);
+        }
+
+        try {
+            $endpoint = 'upp/products-by-sku';
+            $response = $this->request('POST', $endpoint, '', fn () => $this->client->post($endpoint, ['skus' => $skus]));
+            if (!is_array($response) || !array_is_list($response)) {
+                throw new GatewayException('Skupni SKU resolver vratio je neispravan odgovor.');
+            }
+            $resolved = [];
+            foreach ($response as $item) {
+                if (!is_array($item) || !is_string($item['requested_sku'] ?? null)) {
+                    throw new GatewayException('Skupni SKU resolver vratio je nepotpun zapis.');
+                }
+                $requestedSku = $item['requested_sku'];
+                $resolved[$requestedSku] = $this->resolvedProduct($item, $requestedSku);
+            }
+            foreach ($skus as $sku) {
+                if (!array_key_exists($sku, $resolved)) {
+                    throw new GatewayException("Skupni SKU resolver nije vratio rezultat za {$sku}.");
+                }
+            }
+            $this->batchResolverAvailable = true;
+            return $resolved;
+        } catch (GatewayException $exception) {
+            // Omogucuje objavu importera prije nove verzije WordPress dodatka.
+            if ($exception->httpStatus !== 404) {
+                throw $exception;
+            }
+            $this->batchResolverAvailable = false;
+            return $this->resolveProductsIndividually($skus);
+        }
+    }
+
+    private function resolvedProduct(mixed $resolved, string $sku): ?array
+    {
         if (!is_array($resolved) || array_is_list($resolved) || !array_key_exists('found', $resolved)) {
             throw new GatewayException('Neispravan REST odgovor pri razrješavanju SKU-a.');
         }
@@ -72,12 +119,32 @@ final class RestWooCommerceGateway implements WooCommerceGatewayInterface
         }
 
         $parentId = $resolved['parent_id'] ?? null;
-        return [
+        $product = [
             'id' => (int) $resolved['id'],
             'sku' => (string) ($resolved['sku'] ?? $sku),
             'type' => $resolved['type'],
             'parent_id' => is_numeric($parentId) ? (int) $parentId : null,
         ];
+        if (is_string($resolved['name'] ?? null)) {
+            $product['name'] = $resolved['name'];
+        }
+        if (is_array($resolved['categories'] ?? null)) {
+            $product['categories'] = array_values(array_filter(
+                $resolved['categories'],
+                static fn (mixed $category): bool => is_array($category) && is_numeric($category['id'] ?? null),
+            ));
+        }
+        return $product;
+    }
+
+    /** @param list<string> $skus @return array<string, array<string, mixed>|null> */
+    private function resolveProductsIndividually(array $skus): array
+    {
+        $resolved = [];
+        foreach ($skus as $sku) {
+            $resolved[$sku] = $this->resolveProductBySku($sku);
+        }
+        return $resolved;
     }
 
     public function getProduct(int $id, string $sku): array
@@ -147,6 +214,43 @@ final class RestWooCommerceGateway implements WooCommerceGatewayInterface
         return $this->objectResponse($this->request('PUT', $endpoint, $sku, fn () => $this->client->put($endpoint, $payload)));
     }
 
+    public function updateProductsBatch(array $updates): array
+    {
+        if ($updates === [] || count($updates) > 10) {
+            throw new GatewayException('Skupno ažuriranje mora sadržavati između 1 i 10 proizvoda.');
+        }
+        $payload = ['update' => array_map(
+            static fn (array $update): array => ['id' => $update['id']] + $update['payload'],
+            $updates,
+        )];
+        $response = $this->request('POST', 'products/batch', '', fn () => $this->client->post('products/batch', $payload));
+        if (!is_array($response) || !is_array($response['update'] ?? null) || count($response['update']) !== count($updates)) {
+            throw new GatewayException('WooCommerce je vratio nepotpun rezultat skupnog ažuriranja.');
+        }
+
+        $results = [];
+        foreach (array_values($response['update']) as $index => $item) {
+            if (!is_array($item)) {
+                throw new GatewayException('WooCommerce je vratio neispravan rezultat skupnog ažuriranja.');
+            }
+            if (isset($item['code'], $item['message'])) {
+                $message = $this->humanizeParameterNames((string) $item['message']);
+                $results[] = [
+                    'success' => false,
+                    'httpStatus' => is_numeric($item['data']['status'] ?? null) ? (int) $item['data']['status'] : null,
+                    'wooCode' => (string) $item['code'],
+                    'message' => ImportLogger::sanitize($message),
+                ];
+                continue;
+            }
+            if (!is_numeric($item['id'] ?? null) || (int) $item['id'] !== (int) $updates[$index]['id']) {
+                throw new GatewayException('WooCommerce rezultat skupnog ažuriranja ne odgovara poslanom proizvodu.');
+            }
+            $results[] = ['success' => true, 'id' => (int) $item['id']];
+        }
+        return $results;
+    }
+
     public function updateVariation(int $parentId, int $variationId, array $payload, string $sku): array
     {
         $endpoint = "products/{$parentId}/variations/{$variationId}";
@@ -189,6 +293,7 @@ final class RestWooCommerceGateway implements WooCommerceGatewayInterface
                 return $this->normalize($request());
             } catch (Throwable $exception) {
                 [$status, $wooCode, $message] = $this->details($exception);
+                $message = $this->humanizeParameterNames($message);
                 $this->logger?->apiError($operation, $endpoint, $sku, $status, $wooCode, $message, $attempt);
                 $retryable = in_array($status, [429, 502, 503, 504], true) || ($status === null && $this->isTimeout($message));
                 if (!$retryable || $attempt >= 3) {
@@ -235,6 +340,15 @@ final class RestWooCommerceGateway implements WooCommerceGatewayInterface
             }
         }
         return $value;
+    }
+
+    private function humanizeParameterNames(string $message): string
+    {
+        return strtr($message, [
+            'stock_quantity' => 'količina zalihe (stock_quantity)',
+            'stock_status' => 'status zalihe (stock_status)',
+            'manage_stock' => 'upravljanje zalihom (manage_stock)',
+        ]);
     }
 
     private function objectResponse(mixed $response): array

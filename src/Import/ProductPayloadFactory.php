@@ -36,14 +36,18 @@ final class ProductPayloadFactory
 
     private function common(ProductRecord $record, array $categoryIds, ?string $brandName): array
     {
+        // WooCommerce REST v3 deklarira stock_quantity kao integer.
+        // Zaokruživanje naniže je konzervativno i sprječava overselling,
+        // dok decimalni ERP snapshot po skladištima ostaje nepromijenjen.
+        $stockQuantity = (int) floor($record->totalStock);
         $payload = [
             'regular_price' => number_format($record->regularPrice, 2, '.', ''),
             'sale_price' => $record->discount > 0
                 ? number_format(round($record->regularPrice * (1 - $record->discount / 100), 2), 2, '.', '')
                 : '',
             'manage_stock' => true,
-            'stock_quantity' => $this->stockNumber($record->totalStock),
-            'stock_status' => $record->totalStock > 0 ? 'instock' : 'outofstock',
+            'stock_quantity' => $stockQuantity,
+            'stock_status' => $stockQuantity > 0 ? 'instock' : 'outofstock',
             'attributes' => $this->attributeMapper->map($record, $brandName),
         ];
         if ($categoryIds !== []) {

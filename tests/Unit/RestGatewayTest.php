@@ -61,10 +61,14 @@ final class RestGatewayTest extends TestCase
     {
         $simpleClient = new StubClient([[
             'found' => true, 'id' => 100, 'sku' => 'SIMPLE', 'type' => 'simple', 'parent_id' => null,
+            'name' => 'Postojeći naziv', 'categories' => [['id' => 8]],
         ]]);
         $simple = new RestWooCommerceGateway($simpleClient);
         self::assertSame(
-            ['id' => 100, 'sku' => 'SIMPLE', 'type' => 'simple', 'parent_id' => null],
+            [
+                'id' => 100, 'sku' => 'SIMPLE', 'type' => 'simple', 'parent_id' => null,
+                'name' => 'Postojeći naziv', 'categories' => [['id' => 8]],
+            ],
             $simple->resolveProductBySku('SIMPLE'),
         );
         self::assertSame(['GET', 'upp/product-by-sku', ['sku' => 'SIMPLE']], $simpleClient->requests[0]);
@@ -89,6 +93,47 @@ final class RestGatewayTest extends TestCase
         self::assertSame(['GET', 'products/7', []], $client->requests[0]);
     }
 
+    public function testBatchSkuResolverReturnsEveryRequestedProductInOneCall(): void
+    {
+        $client = new StubClient([[
+            [
+                'requested_sku' => 'A', 'found' => true, 'id' => 7, 'sku' => 'A',
+                'type' => 'simple', 'parent_id' => null, 'name' => 'Artikl A', 'categories' => [],
+            ],
+            ['requested_sku' => 'B', 'found' => false],
+        ]]);
+        $gateway = new RestWooCommerceGateway($client);
+
+        $resolved = $gateway->resolveProductsBySku(['A', 'B']);
+
+        self::assertSame(7, $resolved['A']['id']);
+        self::assertSame('Artikl A', $resolved['A']['name']);
+        self::assertNull($resolved['B']);
+        self::assertSame([['POST', 'upp/products-by-sku', ['skus' => ['A', 'B']]]], $client->requests);
+    }
+
+    public function testBatchSkuResolverFallsBackForAnOlderPlugin(): void
+    {
+        $client = new StubClient([
+            $this->httpError(404, 'rest_no_route', 'Ruta nije pronađena'),
+            ['found' => true, 'id' => 7, 'sku' => 'A', 'type' => 'simple', 'parent_id' => null],
+            ['found' => false],
+            ['found' => false],
+        ]);
+        $gateway = new RestWooCommerceGateway($client);
+
+        $resolved = $gateway->resolveProductsBySku(['A', 'B']);
+        $secondCall = $gateway->resolveProductsBySku(['C']);
+
+        self::assertSame(7, $resolved['A']['id']);
+        self::assertNull($resolved['B']);
+        self::assertNull($secondCall['C']);
+        self::assertSame('POST', $client->requests[0][0]);
+        self::assertSame('GET', $client->requests[1][0]);
+        self::assertSame('GET', $client->requests[2][0]);
+        self::assertSame('GET', $client->requests[3][0]);
+    }
+
     public function testVariationUpdateUsesParentAndVariationEndpoint(): void
     {
         $client = new StubClient([['id' => 102, 'sku' => 'VAR']]);
@@ -100,6 +145,34 @@ final class RestGatewayTest extends TestCase
             ['PUT', 'products/100/variations/102', ['stock_quantity' => 5]],
             $client->requests[0],
         );
+    }
+
+    public function testProductBatchUpdateKeepsResultsMatchedByPositionAndId(): void
+    {
+        $client = new StubClient([[
+            'update' => [
+                ['id' => 7, 'sku' => 'A'],
+                [
+                    'code' => 'rest_invalid_param',
+                    'message' => 'Nevaljani parametri: stock_quantity',
+                    'data' => ['status' => 400],
+                ],
+            ],
+        ]]);
+        $gateway = new RestWooCommerceGateway($client);
+
+        $results = $gateway->updateProductsBatch([
+            ['id' => 7, 'sku' => 'A', 'payload' => ['stock_quantity' => 4]],
+            ['id' => 8, 'sku' => 'B', 'payload' => ['stock_quantity' => 2]],
+        ]);
+
+        self::assertSame(['success' => true, 'id' => 7], $results[0]);
+        self::assertFalse($results[1]['success']);
+        self::assertSame(400, $results[1]['httpStatus']);
+        self::assertSame('rest_invalid_param', $results[1]['wooCode']);
+        self::assertSame('Nevaljani parametri: količina zalihe (stock_quantity)', $results[1]['message']);
+        self::assertSame('POST', $client->requests[0][0]);
+        self::assertSame('products/batch', $client->requests[0][1]);
     }
 
     public function testVariationPageReturnsVariationCollection(): void
@@ -129,6 +202,25 @@ final class RestGatewayTest extends TestCase
         $this->expectException(GatewayException::class);
         $this->expectExceptionMessage('SSL provjera nije uspjela');
         $gateway->checkConnection();
+    }
+
+    public function testInvalidStockParameterHasAReadableName(): void
+    {
+        $client = new StubClient([
+            $this->httpError(400, 'rest_invalid_param', 'Nevaljani parametri: stock_quantity'),
+        ]);
+
+        try {
+            (new RestWooCommerceGateway($client))->updateProduct(7, ['stock_quantity' => 2.6], 'SKU');
+            self::fail('Invalid stock quantity accepted.');
+        } catch (GatewayException $exception) {
+            self::assertSame(400, $exception->httpStatus);
+            self::assertSame('rest_invalid_param', $exception->wooCode);
+            self::assertSame(
+                'Nevaljani parametri: količina zalihe (stock_quantity)',
+                $exception->getMessage(),
+            );
+        }
     }
 
     private function httpError(int $status, string $code, string $message): HttpClientException
@@ -164,6 +256,15 @@ final class StubClient extends Client
     {
         $this->calls++;
         $this->requests[] = ['PUT', $endpoint, $data];
+        $response = array_shift($this->responses);
+        if ($response instanceof \Throwable) throw $response;
+        return $response;
+    }
+
+    public function post($endpoint, $data)
+    {
+        $this->calls++;
+        $this->requests[] = ['POST', $endpoint, $data];
         $response = array_shift($this->responses);
         if ($response instanceof \Throwable) throw $response;
         return $response;
